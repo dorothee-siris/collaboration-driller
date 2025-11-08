@@ -171,7 +171,17 @@ else:
     # -----------------------------------------------------------------
     # Bubble chart: strategic weights (global view)
     # -----------------------------------------------------------------
-    st.markdown("### Strategic weight of partners (global view)")
+    st.markdown("### Strategic weight against top selected partners")
+
+    # How many partners to display?
+    max_available = min(100, len(df_filtered))
+    n_top = st.slider(
+        "Number of partners displayed in the chart",
+        min_value=1,
+        max_value=max_available if max_available > 0 else 1,
+        value=max_available if max_available > 0 else 1,
+        step=1,
+    )
 
     # Custom HTML legend (blue / red / grey)
     st.markdown(
@@ -206,10 +216,10 @@ else:
 
     scatter_df["Geo category"] = scatter_df["Partner country"].apply(geo_category)
 
-    # Top 100 by co-publications
+    # Top N by co-publications (controlled by slider)
     scatter_df = scatter_df.sort_values(
         "Count of co-publications", ascending=False
-    ).head(100)
+    ).head(n_top)
 
     # Axis ranges slightly above max, same scale on both axes
     max_x = float(scatter_df["x"].max() or 0.0)
@@ -246,6 +256,13 @@ else:
         },
     )
 
+    # Very thin black outline for bubbles
+    fig.update_traces(
+        marker=dict(
+            line=dict(color="black", width=0.5)
+        )
+    )
+
     # Custom hovertemplate
     fig.update_traces(
         hovertemplate=(
@@ -279,3 +296,4 @@ else:
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
