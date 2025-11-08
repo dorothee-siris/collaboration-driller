@@ -183,6 +183,20 @@ else:
         step=1,
     )
 
+    # Compute minimum co-publications among partners that will be displayed
+    sorted_tmp = df_filtered.sort_values(
+        "Count of co-publications", ascending=False
+    )
+    top_tmp = sorted_tmp.head(n_top)
+
+    if not top_tmp.empty:
+        min_copubs = int(top_tmp["Count of co-publications"].min())
+        st.markdown(
+            f"_All top **{len(top_tmp)}** institutions displayed in the chart below "
+            f"have at least **{min_copubs}** co-publications with "
+            f"Université Paris Cité, given the selected criteria._"
+        )
+
     # Custom HTML legend (blue / red / grey)
     st.markdown(
         """
@@ -198,7 +212,8 @@ else:
         unsafe_allow_html=True,
     )
 
-    scatter_df = df_filtered.copy()
+    # Start from the N partners already selected above
+    scatter_df = top_tmp.copy()
 
     # x = share of partner's total production
     # y = share of UPCité's production
@@ -215,11 +230,6 @@ else:
         return "International"
 
     scatter_df["Geo category"] = scatter_df["Partner country"].apply(geo_category)
-
-    # Top N by co-publications (controlled by slider)
-    scatter_df = scatter_df.sort_values(
-        "Count of co-publications", ascending=False
-    ).head(n_top)
 
     # Axis ranges slightly above max, same scale on both axes
     max_x = float(scatter_df["x"].max() or 0.0)
@@ -271,8 +281,8 @@ else:
             "co-publications: %{customdata[1]:,}<br>"
             "type: %{customdata[2]}<br>"
             "FWCI: %{customdata[3]:.2f}<br>"
-            "share of partner's total production: %{x:.3f}<br>"
-            "share of UPCité's production: %{y:.3f}<extra></extra>"
+            "share of partner's total production: %{x:.1%}<br>"
+            "share of UPCité's production: %{x:.1%}<extra></extra>"
         )
     )
 
