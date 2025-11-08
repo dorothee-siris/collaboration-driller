@@ -98,10 +98,11 @@ with filter_col2:
         .unique()
         .tolist()
     )
+    # Empty selection = no type filter (all types)
     selected_types = st.multiselect(
-        "Filter by partner type",
+        "Filter by partner type (optional)",
         options=all_types,
-        default=all_types,  # all selected by default
+        default=[],  # nothing selected -> all included
     )
 
 # Apply filters
@@ -120,9 +121,6 @@ elif geo_filter == "International only":
 # type filter
 if selected_types:
     df_filtered = df_filtered[df_filtered["Partner type"].astype(str).isin(selected_types)]
-else:
-    # if nothing selected, no partners
-    df_filtered = df_filtered.iloc[0:0]
 
 # ---------------------------------------------------------------------
 # Table (hide Partner's total output column)
@@ -192,9 +190,11 @@ else:
 
     scatter_df = df_filtered.copy()
 
-    # x, y values
-    scatter_df["x"] = scatter_df["Share of UPCité's production"].fillna(0.0)
-    scatter_df["y"] = scatter_df["Share of Partner's total production"].fillna(0.0)
+    # x = share of partner's total production
+    # y = share of UPCité's production
+    scatter_df["x"] = scatter_df["Share of Partner's total production"].fillna(0.0)
+    scatter_df["y"] = scatter_df["Share of UPCité's production"].fillna(0.0)
+    scatter_df["average FWCI"] = scatter_df["average FWCI"].fillna(0.0)
 
     # Category for coloring: France / International / No country
     def geo_category(country: str) -> str:
@@ -211,17 +211,22 @@ else:
         "Count of co-publications", ascending=False
     ).head(100)
 
-    # Axis ranges slightly above max
+    # Axis ranges slightly above max, same scale on both axes
     max_x = float(scatter_df["x"].max() or 0.0)
     max_y = float(scatter_df["y"].max() or 0.0)
-    max_x = max_x * 1.05 if max_x > 0 else 0.01
-    max_y = max_y * 1.05 if max_y > 0 else 0.01
+    max_val = max(max_x, max_y)
+    max_val = max_val * 1.05 if max_val > 0 else 0.01
+
+    # Bubble size = partner's total output
+    size_col = "Partner's total output (2020-24)"
+    scatter_df[size_col] = scatter_df[size_col].fillna(0.0)
 
     fig = px.scatter(
         scatter_df,
         x="x",
         y="y",
-        size="Count of co-publications",
+        size=size_col,
+        size_max=40,
         color="Geo category",
         color_discrete_map={
             "France": "blue",
@@ -229,20 +234,32 @@ else:
             "No country": "#888888",
         },
         hover_name="Partner name",
-        hover_data={
-            "Count of co-publications": True,
-            "Partner type": True,
-            "Partner country": True,
-            "x": False,
-            "y": False,
-        },
+        custom_data=[
+            "Partner country",
+            "Count of co-publications",
+            "Partner type",
+            "average FWCI",
+        ],
         labels={
-            "x": "Share of UPCité's production",
-            "y": "Share of partner's total production",
+            "x": "Share of partner's total production",
+            "y": "Share of UPCité's production",
         },
     )
 
-    # Remove Plotly legend (we have a custom HTML legend)
+    # Custom hovertemplate
+    fig.update_traces(
+        hovertemplate=(
+            "<b>%{hovertext}</b><br><br>"
+            "country: %{customdata[0]}<br>"
+            "co-publications: %{customdata[1]:,}<br>"
+            "type: %{customdata[2]}<br>"
+            "FWCI: %{customdata[3]:.2f}<br>"
+            "share of partner's total production: %{x:.3f}<br>"
+            "share of UPCité's production: %{y:.3f}<extra></extra>"
+        )
+    )
+
+    # Remove Plotly legend (we use the HTML legend)
     fig.update_layout(showlegend=False)
 
     # Diagonal line x = y
@@ -250,12 +267,12 @@ else:
         type="line",
         x0=0,
         y0=0,
-        x1=max_x,
-        y1=max_y,
+        x1=max_val,
+        y1=max_val,
         line=dict(color="gray", dash="dash"),
     )
-    fig.update_xaxes(range=[0, max_x])
-    fig.update_yaxes(range=[0, max_y])
+    fig.update_xaxes(range=[0, max_val])
+    fig.update_yaxes(range=[0, max_val])
 
     fig.update_layout(
         margin=dict(l=0, r=0, t=20, b=0),
