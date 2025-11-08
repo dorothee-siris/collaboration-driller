@@ -111,93 +111,123 @@ df_filtered = top_partners_df.copy()
 if geo_filter == "France only":
     df_filtered = df_filtered[df_filtered["Partner country"] == "France"]
 elif geo_filter == "International only":
-    df_filtered = df_filtered[df_filtered["Partner country"] != "France"]
+    df_filtered = df_filtered[
+        df_filtered["Partner country"].notna()
+        & (df_filtered["Partner country"] != "France")
+        & (df_filtered["Partner country"] != "None")
+    ]
 
 # type filter
 if selected_types:
     df_filtered = df_filtered[df_filtered["Partner type"].astype(str).isin(selected_types)]
 else:
-    # if nothing selected, show empty
+    # if nothing selected, no partners
     df_filtered = df_filtered.iloc[0:0]
 
 # ---------------------------------------------------------------------
 # Table (hide Partner's total output column)
 # ---------------------------------------------------------------------
-table_cols = [
-    "Partner name",
-    "Partner country",
-    "Partner type",
-    "Count of co-publications",
-    "Share of UPCité's production",
-    "Share of Partner's total production",
-    "average FWCI",
-]
-
-df_table = df_filtered[table_cols].sort_values(
-    "Count of co-publications", ascending=False
-)
-
-st.dataframe(
-    df_table,
-    use_container_width=True,
-    column_config={
-        "Share of UPCité's production": st.column_config.ProgressColumn(
-            "Share of UPCité's production",
-            format="%.3f",
-            min_value=0.0,
-            max_value=float(
-                df_table["Share of UPCité's production"].max() or 0.001
-            ),
-        ),
-        "Share of Partner's total production": st.column_config.ProgressColumn(
-            "Share of Partner's total production",
-            format="%.3f",
-            min_value=0.0,
-            max_value=float(
-                df_table["Share of Partner's total production"].max() or 0.001
-            ),
-        ),
-        "average FWCI": st.column_config.NumberColumn(
-            "Average FWCI", format="%.2f"
-        ),
-    },
-)
-
-# ---------------------------------------------------------------------
-# Bubble chart: strategic weights (global view)
-# ---------------------------------------------------------------------
-st.markdown("### Strategic weight of partners (global view)")
-
 if df_filtered.empty:
-    st.info("No partners match the current filters.")
+    st.info("There are no partners matching the selected criteria.")
 else:
+    table_cols = [
+        "Partner name",
+        "Partner country",
+        "Partner type",
+        "Count of co-publications",
+        "Share of UPCité's production",
+        "Share of Partner's total production",
+        "average FWCI",
+    ]
+
+    df_table = df_filtered[table_cols].sort_values(
+        "Count of co-publications", ascending=False
+    )
+
+    st.dataframe(
+        df_table,
+        use_container_width=True,
+        column_config={
+            "Share of UPCité's production": st.column_config.ProgressColumn(
+                "Share of UPCité's production",
+                format="%.3f",
+                min_value=0.0,
+                max_value=float(
+                    (df_table["Share of UPCité's production"].max() or 0.001)
+                ),
+            ),
+            "Share of Partner's total production": st.column_config.ProgressColumn(
+                "Share of Partner's total production",
+                format="%.3f",
+                min_value=0.0,
+                max_value=float(
+                    (df_table["Share of Partner's total production"].max() or 0.001)
+                ),
+            ),
+            "average FWCI": st.column_config.NumberColumn(
+                "Average FWCI", format="%.2f"
+            ),
+        },
+    )
+
+    # -----------------------------------------------------------------
+    # Bubble chart: strategic weights (global view)
+    # -----------------------------------------------------------------
+    st.markdown("### Strategic weight of partners (global view)")
+
+    # Custom HTML legend (blue / red / grey)
+    st.markdown(
+        """
+        <div style="margin-bottom: 0.5rem;">
+          <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background-color:blue;margin-right:4px;"></span>
+          <span style="margin-right:12px;">France</span>
+          <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background-color:red;margin-right:4px;"></span>
+          <span style="margin-right:12px;">International</span>
+          <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background-color:#888;margin-right:4px;"></span>
+          <span>No country information</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     scatter_df = df_filtered.copy()
 
-    # Ensure no NaN in x/y
+    # x, y values
     scatter_df["x"] = scatter_df["Share of UPCité's production"].fillna(0.0)
     scatter_df["y"] = scatter_df["Share of Partner's total production"].fillna(0.0)
+
+    # Category for coloring: France / International / No country
+    def geo_category(country: str) -> str:
+        if country == "France":
+            return "France"
+        if country is None or pd.isna(country) or country == "None" or country == "":
+            return "No country"
+        return "International"
+
+    scatter_df["Geo category"] = scatter_df["Partner country"].apply(geo_category)
 
     # Top 100 by co-publications
     scatter_df = scatter_df.sort_values(
         "Count of co-publications", ascending=False
     ).head(100)
 
-    # Color: blue for France, red for international
-    def country_color(country: str) -> str:
-        return "blue" if country == "France" else "red"
-
-    scatter_df["color"] = scatter_df["Partner country"].apply(country_color)
-
-    max_xy = float(
-        max(scatter_df["x"].max(), scatter_df["y"].max()) * 1.05 or 0.01
-    )
+    # Axis ranges slightly above max
+    max_x = float(scatter_df["x"].max() or 0.0)
+    max_y = float(scatter_df["y"].max() or 0.0)
+    max_x = max_x * 1.05 if max_x > 0 else 0.01
+    max_y = max_y * 1.05 if max_y > 0 else 0.01
 
     fig = px.scatter(
         scatter_df,
         x="x",
         y="y",
         size="Count of co-publications",
-        color="Partner country",  # legend will still show FR vs others
+        color="Geo category",
+        color_discrete_map={
+            "France": "blue",
+            "International": "red",
+            "No country": "#888888",
+        },
         hover_name="Partner name",
         hover_data={
             "Count of co-publications": True,
@@ -212,32 +242,23 @@ else:
         },
     )
 
-    # Override marker colors to blue/red
-    # (France may be 1 or more traces depending on how px groups, but
-    #  easiest is to map in update_traces by name)
-    for trace in fig.data:
-        # trace.name is the country label
-        for i, trace in enumerate(fig.data):
-            if trace.name == "France":
-                fig.data[i].marker.update(color="blue")
-            else:
-                fig.data[i].marker.update(color="red")
+    # Remove Plotly legend (we have a custom HTML legend)
+    fig.update_layout(showlegend=False)
 
     # Diagonal line x = y
     fig.add_shape(
         type="line",
         x0=0,
         y0=0,
-        x1=max_xy,
-        y1=max_xy,
+        x1=max_x,
+        y1=max_y,
         line=dict(color="gray", dash="dash"),
     )
-    fig.update_xaxes(range=[0, max_xy])
-    fig.update_yaxes(range=[0, max_xy])
+    fig.update_xaxes(range=[0, max_x])
+    fig.update_yaxes(range=[0, max_y])
 
     fig.update_layout(
         margin=dict(l=0, r=0, t=20, b=0),
-        legend_title="Partner country",
     )
 
     st.plotly_chart(fig, use_container_width=True)
