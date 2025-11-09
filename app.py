@@ -204,6 +204,35 @@ else:
             f"Université Paris Cité, given the selected criteria._"
         )
 
+    st.markdown(
+        """
+        **How to read this chart**
+
+        - Each bubble represents a partner institution. Its **size** is proportional to
+          that partner’s total number of publications (2020–24), regardless of whether
+          Université Paris Cité is involved.
+        - The **vertical position** (y-axis) shows the share of UPCité’s total output
+          that is co-authored with this partner. The higher a bubble, the more this
+          partner contributes to UPCité’s overall production.
+        - The **horizontal position** (x-axis) shows the share of the **partner’s**
+          total output that involves UPCité. The further a bubble is to the right, the
+          more important UPCité is in that partner’s research portfolio.
+        - The grey **diagonal line** corresponds to situations where collaboration
+          has the same relative weight for UPCité and for the partner.
+            - Bubbles **to the right** of the diagonal are partners for whom
+              collaboration with UPCité weighs more than it does for UPCité. A bubble
+              near the bottom-right, for instance, may correspond to a modest number
+              of co-publications that nevertheless account for a large share of that
+              partner’s overall activity – collaboration with UPCité is very strategic
+              for them.
+            - Bubbles **to the left** of the diagonal are partners that weigh more in
+              UPCité’s portfolio than UPCité weighs in theirs.
+            - Bubbles **close to the diagonal** indicate a more balanced relationship,
+              where collaboration has a comparable weight for both sides.
+        """
+    )
+
+
     # Custom HTML legend (blue / red / grey)
     st.markdown(
         """
