@@ -242,15 +242,19 @@ else:
 
     scatter_df["Geo category"] = scatter_df["Partner country"].apply(geo_category)
 
-    # Axis ranges slightly above max, same scale on both axes
+    # Axis ranges slightly above max, independent for X and Y
     max_x = float(scatter_df["x"].max() or 0.0)
     max_y = float(scatter_df["y"].max() or 0.0)
-    max_val = max(max_x, max_y)
 
-    if max_val > 0:
-        max_val = max_val + 0.05   # add 0.05 above max
-    else:
-        max_val = 0.05             # small default
+    x_max = max_x + 0.05 if max_x > 0 else 0.05
+    y_max = max_y + 0.05 if max_y > 0 else 0.05
+
+    # optional cap at 1.0 if you prefer:
+    # x_max = min(x_max, 1.0)
+    # y_max = min(y_max, 1.0)
+
+    # limit for the diagonal line x = y so it stays inside the frame
+    diag_max = min(x_max, y_max)
 
     # Bubble size = partner's total output
     size_col = "Partner's total output (2020-24)"
@@ -316,26 +320,28 @@ else:
     # Remove Plotly legend (we use the HTML legend)
     fig.update_layout(showlegend=False)
 
-    # Diagonal line x = y
+    # Diagonal line x = y (clipped to the smaller axis max)
     fig.add_shape(
         type="line",
         x0=0,
         y0=0,
-        x1=max_val,
-        y1=max_val,
+        x1=diag_max,
+        y1=diag_max,
         line=dict(color="gray", dash="dash"),
     )
 
-    # Axes: range + percent ticks + slightly larger labels
+    # Axes: independent ranges, percent ticks, larger labels
     fig.update_xaxes(
-        range=[0, max_val],
-        tickformat=".2%",              # show 0.123 as 12.30%
-        title_font=dict(size=14),
+        range=[0, x_max],
+        tickformat=".0%",          # 0%, 10%, 20%, ...
+        dtick=0.1,                 # 0.1 in data terms = 10%
+        title_font=dict(size=15),
     )
     fig.update_yaxes(
-        range=[0, max_val],
-        tickformat=".2%",
-        title_font=dict(size=14),
+        range=[0, y_max],
+        tickformat=".0%",
+        dtick=0.1,
+        title_font=dict(size=15),
     )
 
     fig.update_layout(
