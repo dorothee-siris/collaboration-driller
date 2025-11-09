@@ -10,91 +10,37 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from lib.taxonomy import (
+    build_taxonomy_lookups,
+    canonical_field_order,
+    get_domain_color,
+    get_domain_for_field,
+)
+
 # -------------------------------------------------------------------------
 # Page / paths / constants
 # -------------------------------------------------------------------------
 
-# (Only the first call across the app has an effect, but it's safe here.)
 st.set_page_config(layout="wide")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
-# 4 macro-domains and their colours (used consistently across charts)
-DOMAINS = ["Health Sciences", "Life Sciences", "Physical Sciences", "Social Sciences"]
-DOMAIN_COLORS = {
-    "Health Sciences": "#e41a1c",    # red
-    "Life Sciences": "#4daf4a",      # green
-    "Physical Sciences": "#377eb8",  # blue
-    "Social Sciences": "#984ea3",    # purple
-}
+# --- Taxonomy lookups (domain order, colours, fields, subfields) ---
 
-# Canonical field list, ordered by (domain, field)
-CANONICAL_FIELDS = [
-    # Life Sciences
-    "Agricultural and Biological Sciences",
-    "Biochemistry, Genetics and Molecular Biology",
-    "Immunology and Microbiology",
-    # Health Sciences
-    "Medicine",
-    "Neuroscience",
-    "Nursing",
-    "Pharmacology, Toxicology and Pharmaceutics",
-    "Veterinary",
-    "Dentistry",
-    "Health Professions",
-    # Physical Sciences
-    "Chemical Engineering",
-    "Chemistry",
-    "Computer Science",
-    "Earth and Planetary Sciences",
-    "Energy",
-    "Engineering",
-    "Environmental Science",
-    "Materials Science",
-    "Mathematics",
-    "Physics and Astronomy",
-    # Social Sciences
-    "Arts and Humanities",
-    "Business, Management and Accounting",
-    "Decision Sciences",
-    "Economics, Econometrics and Finance",
-    "Psychology",
-    "Social Sciences",
-]
+_TAX = build_taxonomy_lookups()
 
-FIELD_TO_DOMAIN = {
-    "Agricultural and Biological Sciences": "Life Sciences",
-    "Biochemistry, Genetics and Molecular Biology": "Life Sciences",
-    "Immunology and Microbiology": "Life Sciences",
-    "Medicine": "Health Sciences",
-    "Neuroscience": "Health Sciences",
-    "Nursing": "Health Sciences",
-    "Pharmacology, Toxicology and Pharmaceutics": "Health Sciences",
-    "Veterinary": "Health Sciences",
-    "Dentistry": "Health Sciences",
-    "Health Professions": "Health Sciences",
-    "Chemical Engineering": "Physical Sciences",
-    "Chemistry": "Physical Sciences",
-    "Computer Science": "Physical Sciences",
-    "Earth and Planetary Sciences": "Physical Sciences",
-    "Energy": "Physical Sciences",
-    "Engineering": "Physical Sciences",
-    "Environmental Science": "Physical Sciences",
-    "Materials Science": "Physical Sciences",
-    "Mathematics": "Physical Sciences",
-    "Physics and Astronomy": "Physical Sciences",
-    "Arts and Humanities": "Social Sciences",
-    "Business, Management and Accounting": "Social Sciences",
-    "Decision Sciences": "Social Sciences",
-    "Economics, Econometrics and Finance": "Social Sciences",
-    "Psychology": "Social Sciences",
-    "Social Sciences": "Social Sciences",
-}
+# Use canonical domain order, but drop "Other" for the 4 macro-domains
+DOMAINS = [d for d in _TAX["domain_order"] if d != "Other"]
 
+# colour map for those domains, coming from taxonomy's palette
+DOMAIN_COLORS = {d: get_domain_color(d) for d in DOMAINS}
 
-def field_domain(field: str) -> str:
-    return FIELD_TO_DOMAIN.get(field, "Other")
+# canonical field list, grouped by domain, taken from all_topics.parquet
+CANONICAL_FIELDS = canonical_field_order()
+
+# subfields per field in canonical order
+SUBFIELDS_BY_FIELD = _TAX["subfields_by_field"]
 
 
 # -------------------------------------------------------------------------
@@ -473,7 +419,7 @@ def make_field_df(row) -> pd.DataFrame:
         }
     )
     df = df[df["count"] > 0].copy()
-    df["domain"] = [field_domain(f) for f in df["field"]]
+    df["domain"] = [get_domain_for_field(f) for f in df["field"]]
     df["share_intl_pct"] = df["share_intl"] * 100
     df["share_country_pct"] = df["share_country"] * 100
 
@@ -601,7 +547,7 @@ def make_subfield_df(row) -> pd.DataFrame:
 
         subfields = SUBFIELDS_BY_FIELD.get(field, [])
         n = min(len(counts), len(shares_intl), len(shares_country), len(fwcis), len(subfields))
-        domain = field_domain(field)
+        domain = get_domain_for_field(field)
 
         for i in range(n):
             c = counts[i]
