@@ -61,6 +61,8 @@ def load_geo_data():
     df_partners = pd.read_parquet(DATA_DIR / "upcite_partners.parquet")
     return df_country, df_partners
 
+# Total UPCité publications over 2020–24 (all outputs, not only intl. copubs)
+UPCITE_TOTAL_PUBLICATIONS = 89069
 
 @st.cache_data
 def load_subfields_by_field():
@@ -344,10 +346,10 @@ else:
     st.plotly_chart(fig_map, use_container_width=True)
 
 # -------------------------------------------------------------------------
-# COUNTRY DRILL-DOWN
+# COUNTRY FOCUS
 # -------------------------------------------------------------------------
 
-st.markdown("## Country drill-down")
+st.markdown("## Country Focus")
 
 country_options = sorted(df_country["country"].unique())
 selected_country = st.selectbox(
@@ -370,21 +372,29 @@ row_c = row_c.iloc[0]
 
 # --- Topline metrics ---
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     st.metric("Co-publications with UPCité (2020–24)", f"{int(row_c['copubs']):,}")
 
+# NEW metric: share vs *all* UPCité publications
+share_vs_total = row_c["copubs"] / UPCITE_TOTAL_PUBLICATIONS if UPCITE_TOTAL_PUBLICATIONS else 0.0
 with col2:
+    st.metric(
+        "Share of UPCité's total output",
+        f"{share_vs_total * 100:.2f}%",
+    )
+
+with col3:
     st.metric(
         "Share of UPCité's international collaborations",
         f"{row_c['share_vs_upcite_intl'] * 100:.2f}%",
     )
 
-with col3:
+with col4:
     st.metric("Number of distinct partners", f"{int(row_c['num_partners']):,}")
 
-with col4:
+with col5:
     st.metric("Average FWCI", f"{row_c['avg_fwci']:.2f}")
 
 
@@ -817,6 +827,7 @@ else:
             "Share of UPCité's production",
             "Share of Partner's total production",
             "average FWCI",
+            "Top 5 subfields",   # <-- add this line
         ]
         df_pt = df_country_partners[base_cols].copy()
 
