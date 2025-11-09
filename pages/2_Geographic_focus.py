@@ -490,7 +490,7 @@ else:
 # Toggle: use same horizontal scale for both field charts
 lock_field_axes = st.toggle(
     "Use the same horizontal scale for both field charts",
-    value=True,
+    value=False,
 )
 
 shared_max = max(max_share_country, max_share_intl) if lock_field_axes else None
