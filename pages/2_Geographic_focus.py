@@ -509,7 +509,7 @@ with col_fc:
         fig_fc.update_layout(
             margin=dict(l=0, r=0, t=25, b=10),
             showlegend=False,
-            height=600,  # ~50% taller than default
+            height=800,  # ~50% taller than default
         )
 
         st.plotly_chart(fig_fc, use_container_width=True)
@@ -527,7 +527,7 @@ with col_fi:
         fig_fi = px.bar(
             df_fields,
             x="share_intl_pct",
-            y="field",
+            y="Field",
             orientation="h",
             color="domain",
             color_discrete_map=DOMAIN_COLORS,
@@ -574,7 +574,7 @@ with col_fi:
         fig_fi.update_layout(
             margin=dict(l=0, r=0, t=25, b=10),
             showlegend=False,
-            height=600,
+            height=800,
         )
 
         st.plotly_chart(fig_fi, use_container_width=True)
