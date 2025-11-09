@@ -173,12 +173,11 @@ def build_country_field_df(country_row: pd.Series) -> pd.DataFrame:
     Build a DataFrame with one row per field, in canonical taxonomy order,
     with count & share columns for this country.
 
-    - share_vs_country: vs this country's total co-publications (0–1)
-    - share_vs_intl:    vs all UPCité international co-publications (0–1)
+    The series in upcite_country are stored by field ID in ascending order
+    (11, 12, ..., 36). We map those IDs to field names, then reindex to the
+    canonical field order used in the taxonomy.
     """
-    field_names = CANONICAL_FIELDS
-    n_fields = len(field_names)
-
+    # Parse numeric series from the row
     counts = _parse_pipe_numbers(country_row.get("copubs_per_field", ""), as_float=False)
     shares_country = _parse_pipe_numbers(
         country_row.get("field_share_vs_country", ""), as_float=True
@@ -188,20 +187,28 @@ def build_country_field_df(country_row: pd.Series) -> pd.DataFrame:
     )
     fwci_vals = _parse_pipe_numbers(country_row.get("fwci_per_field", ""), as_float=True)
 
-    def _pad(lst, pad_value=0.0):
+    n = len(counts)
+
+    # Pad other arrays to the same length, just in case
+    def _pad_to_n(lst, pad_value=0.0):
         lst = list(lst)
-        if len(lst) < n_fields:
-            lst += [pad_value] * (n_fields - len(lst))
-        return lst[:n_fields]
+        if len(lst) < n:
+            lst += [pad_value] * (n - len(lst))
+        return lst[:n]
 
-    counts = _pad(counts, 0)
-    shares_country = _pad(shares_country, 0.0)
-    shares_intl = _pad(shares_intl, 0.0)
-    fwci_vals = _pad(fwci_vals, 0.0)
+    shares_country = _pad_to_n(shares_country, 0.0)
+    shares_intl = _pad_to_n(shares_intl, 0.0)
+    fwci_vals = _pad_to_n(fwci_vals, 0.0)
 
-    df = pd.DataFrame(
+    # Values are in ascending field ID order from 11 upward
+    field_ids = list(range(11, 11 + n))
+    fid2name = _TAX["field_id_to_name"]
+    field_names_from_ids = [fid2name.get(str(fid), f"Field {fid}") for fid in field_ids]
+
+    # Raw df for existing fields
+    df_raw = pd.DataFrame(
         {
-            "Field": field_names,
+            "Field": field_names_from_ids,
             "count": counts,
             "share_vs_country": shares_country,
             "share_vs_intl": shares_intl,
@@ -209,10 +216,17 @@ def build_country_field_df(country_row: pd.Series) -> pd.DataFrame:
         }
     )
 
-    # Add domain + colour for each field
+    # Reindex onto the canonical field list: one row per canonical field,
+    # filled with zeros where this country has no co-publications.
+    df = (
+        df_raw.set_index("Field")
+        .reindex(CANONICAL_FIELDS, fill_value=0)
+        .reset_index()
+        .rename(columns={"index": "Field"})
+    )
+
     df["domain"] = df["Field"].apply(get_domain_for_field)
     df["color"] = df["Field"].apply(get_field_color)
-
     return df
 
 
@@ -246,6 +260,13 @@ metric_map = {
     "Average FWCI": ("avg_fwci", "Average FWCI"),
 }
 metric_col, metric_label = metric_map[metric_choice]
+
+color_scale_map = {
+    "copubs": "Greens",        # co-publications → green
+    "num_partners": "Blues",   # partners → blue
+    "avg_fwci": "Reds",        # FWCI → red
+}
+color_scale = color_scale_map.get(metric_col, "Reds")
 
 min_copubs_all = int(df_country["copubs"].min())
 max_copubs_all = int(df_country["copubs"].max())
@@ -296,7 +317,7 @@ else:
         locations="country",
         locationmode="country names",
         color=metric_col,
-        color_continuous_scale="Reds",
+        color_continuous_scale=color_scale,
         hover_name="country",
         labels={metric_col: metric_label},
     )
@@ -366,6 +387,9 @@ with col3:
 with col4:
     st.metric("Average FWCI", f"{row_c['avg_fwci']:.2f}")
 
+
+st.markdown("### Yearly distribution by domain")
+
 # --- Domain legend just below metrics ---
 
 legend_html = "<div style='margin: 0.8rem 0 0.4rem 0;'>"
@@ -381,8 +405,6 @@ legend_html += "</div>"
 st.markdown(legend_html, unsafe_allow_html=True)
 
 # --- Yearly breakdown by domain (stacked bar) ---
-
-st.markdown("### Temporal profile by domain")
 
 df_year_dom = parse_year_domain_counts(row_c.get("copubs_per_year_domain"))
 df_year_dom = df_year_dom[df_year_dom["copubs"] > 0]
@@ -424,7 +446,10 @@ df_fields["share_intl_pct"] = df_fields["share_vs_intl"] * 100.0
 col_fc, col_fi = st.columns(2)
 
 with col_fc:
-    st.markdown("#### By field – share of this country's co-publications")
+    st.markdown(
+        f"#### Distribution by field  \n"
+        f"against all co-publications with {selected_country}"
+    )
     if df_fields.empty:
         st.info("No field-level data for this country.")
     else:
@@ -455,7 +480,10 @@ with col_fc:
         st.plotly_chart(fig_fc, use_container_width=True)
 
 with col_fi:
-    st.markdown("#### By field – share of UPCité’s international collaborations")
+    st.markdown(
+        "#### Distribution by field  \n"
+        "against all UPCité’s international co-publications"
+    )
     if df_fields.empty:
         st.info("No field-level data for this country.")
     else:
@@ -551,6 +579,59 @@ def make_subfield_df(row) -> pd.DataFrame:
     )
     return df
 
+def make_partner_top5_subfields(row: pd.Series) -> str:
+    """
+    For a partner row, aggregate all subfields across all fields using the
+    'Relative share per subfield ... vs Partner total' columns, and return a
+    string with the top 5 subfields by share, formatted:
+      'Subfield 1 (x.x%) | Subfield 2 (y.y%) | ...'
+    """
+    records = []
+
+    for field in CANONICAL_FIELDS:
+        base = f'within "{field}"'
+        # Look for columns like:
+        # 'Relative share per subfield within "Agricultural and Biological Sciences" (id: 11) vs Partner total'
+        share_partner_col = next(
+            (
+                c
+                for c in row.index
+                if c.startswith("Relative share per subfield")
+                and base in c
+                and "vs Partner total" in c
+            ),
+            None,
+        )
+        if not share_partner_col:
+            continue
+
+        shares_partner = parse_pipe(row[share_partner_col], float)
+        subfields = SUBFIELDS_BY_FIELD.get(field, [])
+        n = min(len(shares_partner), len(subfields))
+
+        for i in range(n):
+            s = shares_partner[i]
+            if s is None or s <= 0:
+                continue
+            records.append(
+                {
+                    "subfield": subfields[i],
+                    "share_partner": s,
+                }
+            )
+
+    if not records:
+        return ""
+
+    df = pd.DataFrame(records)
+    df.sort_values("share_partner", ascending=False, inplace=True)
+    top = df.head(5)
+
+    return " | ".join(
+        f"{r.subfield} ({r.share_partner * 100:.1f}%)"
+        for _, r in top.iterrows()
+    )
+
 
 st.markdown("#### Breakdown by subfield")
 
@@ -643,9 +724,9 @@ else:
     # Filter by partner type
     partner_types = sorted(df_country_partners["Partner type"].dropna().unique())
     selected_types = st.multiselect(
-        "Filter by partner type",
+        "Filter by partner type (optional)",
         options=partner_types,
-        default=partner_types,
+        default=[],  # no filter selected by default
     )
 
     if selected_types:
@@ -656,6 +737,11 @@ else:
     if df_country_partners.empty:
         st.info("No partner institutions match the selected type(s).")
     else:
+        # Compute Top 5 subfields for each partner (using partner-level shares)
+        df_country_partners["Top 5 subfields"] = df_country_partners.apply(
+            make_partner_top5_subfields, axis=1
+        )
+        
         # Prepare table + convert shares to % for nicer display
         base_cols = [
             "Partner name",
@@ -663,7 +749,7 @@ else:
             "Count of co-publications",
             "Share of UPCité's production",
             "Share of Partner's total production",
-            "average FWCI",
+            "Average FWCI",
         ]
         df_pt = df_country_partners[base_cols].copy()
 
@@ -685,7 +771,8 @@ else:
                 "Count of co-publications",
                 "Share of UPCité's production (%)",
                 "Share of Partner's total production (%)",
-                "average FWCI",
+                "Average FWCI",
+                "Top 5 subfields",
             ]
         ]
 
