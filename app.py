@@ -64,9 +64,8 @@ n_top_partners = len(top_partners_df)
 col1, col2, col3 = st.columns(3)
 col1.metric("Total UPCité publications (2020–24)", f"{total_pubs:,}")
 col2.metric(
-    "International publications",
-    f"{intl_pubs:,}",
-    f"{intl_share*100:,.1f}%",
+    "% of international publications",
+    f"{intl_share*100:.2f}%",   # e.g. 50.92%
 )
 col3.metric(
     f"Top partners (≥ {TOP_THRESHOLD} co-pubs)",
@@ -139,28 +138,36 @@ else:
     ]
 
     df_table = df_filtered[table_cols].sort_values(
-        "Count of co-publications", ascending=False
+        "Count of co-publiclications", ascending=False
+    )
+
+    # Create a display copy where shares are expressed in %
+    df_table_display = df_table.copy()
+    df_table_display["Share of UPCité's production"] *= 100
+    df_table_display["Share of Partner's total production"] *= 100
+
+    max_upcite = float(
+        (df_table_display["Share of UPCité's production"].max() or 0.01)
+    )
+    max_partner = float(
+        (df_table_display["Share of Partner's total production"].max() or 0.01)
     )
 
     st.dataframe(
-        df_table,
+        df_table_display,
         use_container_width=True,
         column_config={
             "Share of UPCité's production": st.column_config.ProgressColumn(
                 "Share of UPCité's production",
-                format="%.3f",
+                format="%.2f%%",  # show e.g. 3.45%
                 min_value=0.0,
-                max_value=float(
-                    (df_table["Share of UPCité's production"].max() or 0.001)
-                ),
+                max_value=max_upcite,
             ),
             "Share of Partner's total production": st.column_config.ProgressColumn(
                 "Share of Partner's total production",
-                format="%.3f",
+                format="%.2f%%",
                 min_value=0.0,
-                max_value=float(
-                    (df_table["Share of Partner's total production"].max() or 0.001)
-                ),
+                max_value=max_partner,
             ),
             "average FWCI": st.column_config.NumberColumn(
                 "Average FWCI", format="%.2f"
@@ -239,7 +246,11 @@ else:
     max_x = float(scatter_df["x"].max() or 0.0)
     max_y = float(scatter_df["y"].max() or 0.0)
     max_val = max(max_x, max_y)
-    max_val = max_val * 1.05 if max_val > 0 else 0.01
+
+    if max_val > 0:
+        max_val = max_val + 0.05   # add 0.05 above max
+    else:
+        max_val = 0.05             # small default
 
     # Bubble size = partner's total output
     size_col = "Partner's total output (2020-24)"
@@ -314,8 +325,18 @@ else:
         y1=max_val,
         line=dict(color="gray", dash="dash"),
     )
-    fig.update_xaxes(range=[0, max_val])
-    fig.update_yaxes(range=[0, max_val])
+
+    # Axes: range + percent ticks + slightly larger labels
+    fig.update_xaxes(
+        range=[0, max_val],
+        tickformat=".2%",              # show 0.123 as 12.30%
+        title_font=dict(size=14),
+    )
+    fig.update_yaxes(
+        range=[0, max_val],
+        tickformat=".2%",
+        title_font=dict(size=14),
+    )
 
     fig.update_layout(
         margin=dict(l=0, r=0, t=20, b=0),
