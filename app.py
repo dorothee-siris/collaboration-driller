@@ -138,7 +138,7 @@ else:
     ]
 
     df_table = df_filtered[table_cols].sort_values(
-        "Count of co-publiclications", ascending=False
+        "Count of co-publications", ascending=False
     )
 
     # Create a display copy where shares are expressed in %
