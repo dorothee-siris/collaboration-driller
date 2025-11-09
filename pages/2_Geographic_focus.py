@@ -446,13 +446,54 @@ else:
 # Thematic profile (fields, subfields)
 # -------------------------------------------------------------------------
 
-st.markdown("### Thematic profile of collaborations")
+st.markdown("### Thematic profile by field and subfield")
+
+st.markdown(
+    """
+**How to read the percentages below**
+
+For each **field** and **subfield**, two different shares are shown:
+
+- **Share vs this country's co-publications**  
+  Among *all* co-publications between Université Paris Cité and the selected country,  
+  what proportion belongs to this field or subfield?  
+  → This tells you how important a topic is **within the bilateral collaboration** with this country.
+
+- **Share vs all UPCité international co-publications in this category**  
+  Among *all* international co-publications of UPCité in the same field or subfield  
+  (with any country), what proportion involves this country?  
+  → This tells you how important the **country is for UPCité in that topic**, compared with all other international partners.
+
+High values on the **first** metric highlight topics that are a **specialty of the relationship**.  
+High values on the **second** metric highlight topics where the country is a **strategic partner for UPCité**.
+"""
+)
 
 # --- Field-level breakdown (two baselines: vs country & vs intl) ----------
 
 df_fields = build_country_field_df(row_c)
 df_fields["share_country_pct"] = df_fields["share_vs_country"] * 100.0
 df_fields["share_intl_pct"] = df_fields["share_vs_intl"] * 100.0
+
+# Precompute max shares for optional common x-scale
+if df_fields.empty:
+    max_share_country = max_share_intl = 1.0
+else:
+    max_share_country = float(df_fields["share_country_pct"].max() or 0.0)
+    if max_share_country <= 0:
+        max_share_country = 1.0
+
+    max_share_intl = float(df_fields["share_intl_pct"].max() or 0.0)
+    if max_share_intl <= 0:
+        max_share_intl = 1.0
+
+# Toggle: use same horizontal scale for both field charts
+lock_field_axes = st.checkbox(
+    "Use the same horizontal scale for both field charts",
+    value=True,
+)
+
+shared_max = max(max_share_country, max_share_intl) if lock_field_axes else None
 
 col_fc, col_fi = st.columns(2)
 
@@ -490,13 +531,12 @@ with col_fc:
 
         # --- Left gutter for counts + gridlines + fonts + % ticks ---
 
-        max_share_c = float(df_fields["share_country_pct"].max() or 0.0)
-        if max_share_c <= 0:
-            max_share_c = 1.0
-        gutter_c = max_share_c * 0.20  # 20% of max as left gutter
+        # Use shared max if toggle is on, otherwise the country-specific max
+        max_plot_c = shared_max if shared_max is not None else max_share_country
+        gutter_c = max_plot_c * 0.20  # 20% of max as left gutter
 
         fig_fc.update_xaxes(
-            range=[-gutter_c, max_share_c * 1.05],
+            range=[-gutter_c, max_plot_c * 1.05],
             showgrid=True,
             gridcolor="#e0e0e0",
             ticksuffix="%",
@@ -557,13 +597,12 @@ with col_fi:
             ),
         )
 
-        max_share_i = float(df_fields["share_intl_pct"].max() or 0.0)
-        if max_share_i <= 0:
-            max_share_i = 1.0
-        gutter_i = max_share_i * 0.20
+        # Use shared max if toggle is on, otherwise the intl-specific max
+        max_plot_i = shared_max if shared_max is not None else max_share_intl
+        gutter_i = max_plot_i * 0.20
 
         fig_fi.update_xaxes(
-            range=[-gutter_i, max_share_i * 1.05],
+            range=[-gutter_i, max_plot_i * 1.05],
             showgrid=True,
             gridcolor="#e0e0e0",
             ticksuffix="%",
