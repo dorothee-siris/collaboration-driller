@@ -454,29 +454,64 @@ with col_fc:
         st.info("No field-level data for this country.")
     else:
         customdata_fc = df_fields[["count", "fwci"]].to_numpy()
-        fig_fc = go.Figure()
-        fig_fc.add_bar(
-            x=df_fields["share_country_pct"],
-            y=df_fields["Field"],
+
+        # Base bar chart (no text, we’ll add counts as separate annotations)
+        fig_fc = px.bar(
+            df_fields,
+            x="share_country_pct",
+            y="field",
             orientation="h",
-            marker=dict(color=df_fields["color"]),
+            color="domain",
+            color_discrete_map=DOMAIN_COLORS,
+            labels={"share_country_pct": "Share (%)", "field": ""},
+        )
+
+        fig_fc.update_traces(
             customdata=customdata_fc,
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "Share (vs this country's collaborations): %{x:.1f}%<br>"
                 "Co-publications: %{customdata[0]:,.0f}<br>"
-                "Average FWCI: %{customdata[1]:.2f}<extra></extra>"
+                "Average FWCI: %{customdata[1]:.2f}"
+                "<extra></extra>"
             ),
-            text=df_fields["count"],
-            textposition="outside",
         )
+
+        # --- Left gutter for counts + gridlines + fonts + % ticks ---
+
+        max_share_c = float(df_fields["share_country_pct"].max() or 0.0)
+        if max_share_c <= 0:
+            max_share_c = 1.0
+        gutter_c = max_share_c * 0.20  # 20% of max as left gutter
+
+        fig_fc.update_xaxes(
+            range=[-gutter_c, max_share_c * 1.05],
+            showgrid=True,
+            gridcolor="#e0e0e0",
+            ticksuffix="%",
+            tickfont=dict(size=12),
+        )
+        fig_fc.update_yaxes(tickfont=dict(size=13))
+
+        # Counts in the gutter (between y-axis and x=0)
+        for field_name, cnt in zip(df_fields["field"], df_fields["count"]):
+            fig_fc.add_annotation(
+                x=-gutter_c * 0.98,
+                y=field_name,
+                text=f"{int(cnt)}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="middle",
+                font=dict(size=12, color="#444"),
+            )
+
+        # Slightly taller chart
         fig_fc.update_layout(
-            margin=dict(l=0, r=0, t=25, b=0),
-            xaxis_title="Share (%)",
-            yaxis_title="",
-            yaxis=dict(autorange="reversed"),
+            margin=dict(l=0, r=0, t=25, b=10),
             showlegend=False,
+            height=600,  # ~50% taller than default
         )
+
         st.plotly_chart(fig_fc, use_container_width=True)
 
 with col_fi:
@@ -488,31 +523,62 @@ with col_fi:
         st.info("No field-level data for this country.")
     else:
         customdata_fi = df_fields[["count", "fwci"]].to_numpy()
-        fig_fi = go.Figure()
-        fig_fi.add_bar(
-            x=df_fields["share_intl_pct"],
-            y=df_fields["Field"],
+
+        fig_fi = px.bar(
+            df_fields,
+            x="share_intl_pct",
+            y="field",
             orientation="h",
-            marker=dict(color=df_fields["color"]),
+            color="domain",
+            color_discrete_map=DOMAIN_COLORS,
+            labels={"share_intl_pct": "Share (%)", "field": ""},
+        )
+
+        fig_fi.update_traces(
             customdata=customdata_fi,
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "Share (vs all UPCité international co-publications in this field): "
                 "%{x:.1f}%<br>"
                 "Co-publications with this country: %{customdata[0]:,.0f}<br>"
-                "Average FWCI: %{customdata[1]:.2f}<extra></extra>"
+                "Average FWCI: %{customdata[1]:.2f}"
+                "<extra></extra>"
             ),
-            text=df_fields["count"],
-            textposition="outside",
         )
+
+        max_share_i = float(df_fields["share_intl_pct"].max() or 0.0)
+        if max_share_i <= 0:
+            max_share_i = 1.0
+        gutter_i = max_share_i * 0.20
+
+        fig_fi.update_xaxes(
+            range=[-gutter_i, max_share_i * 1.05],
+            showgrid=True,
+            gridcolor="#e0e0e0",
+            ticksuffix="%",
+            tickfont=dict(size=12),
+        )
+        fig_fi.update_yaxes(tickfont=dict(size=13))
+
+        for field_name, cnt in zip(df_fields["field"], df_fields["count"]):
+            fig_fi.add_annotation(
+                x=-gutter_i * 0.98,
+                y=field_name,
+                text=f"{int(cnt)}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="middle",
+                font=dict(size=12, color="#444"),
+            )
+
         fig_fi.update_layout(
-            margin=dict(l=0, r=0, t=25, b=0),
-            xaxis_title="Share (%)",
-            yaxis_title="",
-            yaxis=dict(autorange="reversed"),
+            margin=dict(l=0, r=0, t=25, b=10),
             showlegend=False,
+            height=600,
         )
+
         st.plotly_chart(fig_fi, use_container_width=True)
+
 
 # --- Subfield table (two baselines, progress bars) ------------------------
 
@@ -749,7 +815,7 @@ else:
             "Count of co-publications",
             "Share of UPCité's production",
             "Share of Partner's total production",
-            "Average FWCI",
+            "average FWCI",
         ]
         df_pt = df_country_partners[base_cols].copy()
 
@@ -771,7 +837,7 @@ else:
                 "Count of co-publications",
                 "Share of UPCité's production (%)",
                 "Share of Partner's total production (%)",
-                "Average FWCI",
+                "average FWCI",
                 "Top 5 subfields",
             ]
         ]
