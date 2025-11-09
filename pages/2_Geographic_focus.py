@@ -488,7 +488,7 @@ else:
         max_share_intl = 1.0
 
 # Toggle: use same horizontal scale for both field charts
-lock_field_axes = st.checkbox(
+lock_field_axes = st.toggle(
     "Use the same horizontal scale for both field charts",
     value=True,
 )
