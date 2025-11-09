@@ -8,11 +8,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from lib.taxonomy import (
     build_taxonomy_lookups,
     canonical_field_order,
+    get_field_color,
     get_domain_color,
     get_domain_for_field,
 )
@@ -36,12 +38,17 @@ DOMAINS = [d for d in _TAX["domain_order"] if d != "Other"]
 # colour map for those domains, coming from taxonomy's palette
 DOMAIN_COLORS = {d: get_domain_color(d) for d in DOMAINS}
 
+# Emojis to visually mark domains in tables (including Other for subfields)
+DOMAIN_EMOJI = {
+    "Health Sciences": "🟥",
+    "Life Sciences": "🟩",
+    "Physical Sciences": "🟦",
+    "Social Sciences": "🟨",
+    "Other": "⬜",
+}
+
 # canonical field list, grouped by domain, taken from all_topics.parquet
 CANONICAL_FIELDS = canonical_field_order()
-
-# subfields per field in canonical order
-SUBFIELDS_BY_FIELD = _TAX["subfields_by_field"]
-
 
 # -------------------------------------------------------------------------
 # Data loading helpers
@@ -140,6 +147,73 @@ def parse_year_domain_counts(raw: str) -> pd.DataFrame:
             )
 
     return pd.DataFrame(records)
+
+
+# ---------- helpers to parse "a | b | c" strings into numeric lists ----------
+
+
+def _parse_pipe_numbers(s, as_float=False):
+    if pd.isna(s):
+        return []
+    vals = []
+    for tok in str(s).split("|"):
+        tok = tok.strip()
+        if not tok:
+            vals.append(0.0 if as_float else 0)
+        else:
+            if as_float:
+                vals.append(float(tok.replace(",", ".")))
+            else:
+                vals.append(int(tok))
+    return vals
+
+
+def build_country_field_df(country_row: pd.Series) -> pd.DataFrame:
+    """
+    Build a DataFrame with one row per field, in canonical taxonomy order,
+    with count & share columns for this country.
+
+    - share_vs_country: vs this country's total co-publications (0–1)
+    - share_vs_intl:    vs all UPCité international co-publications (0–1)
+    """
+    field_names = CANONICAL_FIELDS
+    n_fields = len(field_names)
+
+    counts = _parse_pipe_numbers(country_row.get("copubs_per_field", ""), as_float=False)
+    shares_country = _parse_pipe_numbers(
+        country_row.get("field_share_vs_country", ""), as_float=True
+    )
+    shares_intl = _parse_pipe_numbers(
+        country_row.get("field_share_vs_intl", ""), as_float=True
+    )
+    fwci_vals = _parse_pipe_numbers(country_row.get("fwci_per_field", ""), as_float=True)
+
+    def _pad(lst, pad_value=0.0):
+        lst = list(lst)
+        if len(lst) < n_fields:
+            lst += [pad_value] * (n_fields - len(lst))
+        return lst[:n_fields]
+
+    counts = _pad(counts, 0)
+    shares_country = _pad(shares_country, 0.0)
+    shares_intl = _pad(shares_intl, 0.0)
+    fwci_vals = _pad(fwci_vals, 0.0)
+
+    df = pd.DataFrame(
+        {
+            "Field": field_names,
+            "count": counts,
+            "share_vs_country": shares_country,
+            "share_vs_intl": shares_intl,
+            "fwci": fwci_vals,
+        }
+    )
+
+    # Add domain + colour for each field
+    df["domain"] = df["Field"].apply(get_domain_for_field)
+    df["color"] = df["Field"].apply(get_field_color)
+
+    return df
 
 
 # -------------------------------------------------------------------------
@@ -243,7 +317,7 @@ else:
     fig_map.update_layout(
         margin=dict(l=0, r=0, t=20, b=0),
         coloraxis_colorbar=dict(title=metric_label),
-        height=550,
+        height=650,
     )
 
     st.plotly_chart(fig_map, use_container_width=True)
@@ -254,12 +328,17 @@ else:
 
 st.markdown("## Country drill-down")
 
-all_countries = sorted(df_country["country"].dropna().unique().tolist())
-default_index = all_countries.index("France") if "France" in all_countries else 0
-
+country_options = sorted(df_country["country"].unique())
 selected_country = st.selectbox(
-    "Select a country to explore in detail:", all_countries, index=default_index
+    "Select a country",
+    country_options,
+    index=None,
+    placeholder="Choose a country to explore",
 )
+
+if selected_country is None:
+    st.info("Select a country above to see detailed indicators for one country.")
+    st.stop()
 
 row_c = df_country.loc[df_country["country"] == selected_country]
 if row_c.empty:
@@ -326,180 +405,84 @@ else:
     )
     fig_year_dom.update_layout(
         margin=dict(l=0, r=0, t=25, b=0),
-        legend_title_text="",
+        showlegend=False,
     )
     st.plotly_chart(fig_year_dom, use_container_width=True)
 
 # -------------------------------------------------------------------------
-# Thematic profile (domains, fields, subfields)
+# Thematic profile (fields, subfields)
 # -------------------------------------------------------------------------
 
 st.markdown("### Thematic profile of collaborations")
 
-# --- Domain-level breakdown (share vs country totals) ---------------------
-
-
-def make_domain_df(row) -> pd.DataFrame:
-    counts = parse_pipe(row["copubs_per_domain"], int)
-    shares_country = parse_pipe(row["domain_share_vs_country"], float)
-    fwcis = parse_pipe(row["fwci_per_domain"], float)
-
-    n = min(len(DOMAINS), len(counts), len(shares_country), len(fwcis))
-    df = pd.DataFrame(
-        {
-            "domain": DOMAINS[:n],
-            "count": counts[:n],
-            "share_country": shares_country[:n],
-            "fwci": fwcis[:n],
-        }
-    )
-    df = df[df["count"] > 0].copy()
-    df["share_country_pct"] = df["share_country"] * 100
-    df.sort_values("share_country_pct", ascending=True, inplace=True)
-    return df
-
-
-df_dom = make_domain_df(row_c)
-
-col_dom, col_fields = st.columns([1, 2])
-
-with col_dom:
-    st.markdown("#### Breakdown by domain (share of this country's co-publications)")
-    if df_dom.empty:
-        st.info("No domain-level data for this country.")
-    else:
-        customdata_dom = df_dom[["count", "fwci"]].to_numpy()
-        fig_dom = px.bar(
-            df_dom,
-            x="share_country_pct",
-            y="domain",
-            orientation="h",
-            color="domain",
-            color_discrete_map=DOMAIN_COLORS,
-            labels={"share_country_pct": "Share (%)", "domain": ""},
-            text="count",
-        )
-        fig_dom.update_traces(
-            texttemplate="%{text:,d}",
-            textposition="outside",
-            customdata=customdata_dom,
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                "Share (vs this country's collaborations): %{x:.1f}%<br>"
-                "Co-publications: %{customdata[0]:,.0f}<br>"
-                "Average FWCI: %{customdata[1]:.2f}"
-                "<extra></extra>"
-            ),
-        )
-        fig_dom.update_layout(
-            margin=dict(l=0, r=0, t=25, b=0),
-            showlegend=False,
-        )
-        st.plotly_chart(fig_dom, use_container_width=True)
-
 # --- Field-level breakdown (two baselines: vs country & vs intl) ----------
 
-
-def make_field_df(row) -> pd.DataFrame:
-    counts = parse_pipe(row["copubs_per_field"], int)
-    shares_intl = parse_pipe(row["field_share_vs_intl"], float)
-    shares_country = parse_pipe(row["field_share_vs_country"], float)
-    fwcis = parse_pipe(row["fwci_per_field"], float)
-
-    n = min(
-        len(CANONICAL_FIELDS), len(counts), len(shares_intl), len(shares_country), len(fwcis)
-    )
-    df = pd.DataFrame(
-        {
-            "field": CANONICAL_FIELDS[:n],
-            "count": counts[:n],
-            "share_intl": shares_intl[:n],
-            "share_country": shares_country[:n],
-            "fwci": fwcis[:n],
-        }
-    )
-    df = df[df["count"] > 0].copy()
-    df["domain"] = [get_domain_for_field(f) for f in df["field"]]
-    df["share_intl_pct"] = df["share_intl"] * 100
-    df["share_country_pct"] = df["share_country"] * 100
-
-    # Keep canonical order (already given by CANONICAL_FIELDS)
-    df["order"] = [CANONICAL_FIELDS.index(f) for f in df["field"]]
-    df.sort_values("order", inplace=True)
-    df.drop(columns=["order"], inplace=True)
-    return df
-
-
-df_field = make_field_df(row_c)
+df_fields = build_country_field_df(row_c)
+df_fields["share_country_pct"] = df_fields["share_vs_country"] * 100.0
+df_fields["share_intl_pct"] = df_fields["share_vs_intl"] * 100.0
 
 col_fc, col_fi = st.columns(2)
 
 with col_fc:
     st.markdown("#### By field – share of this country's co-publications")
-    if df_field.empty:
+    if df_fields.empty:
         st.info("No field-level data for this country.")
     else:
-        customdata_fc = df_field[["count", "fwci"]].to_numpy()
-        fig_fc = px.bar(
-            df_field,
-            x="share_country_pct",
-            y="field",
+        customdata_fc = df_fields[["count", "fwci"]].to_numpy()
+        fig_fc = go.Figure()
+        fig_fc.add_bar(
+            x=df_fields["share_country_pct"],
+            y=df_fields["Field"],
             orientation="h",
-            color="domain",
-            color_discrete_map=DOMAIN_COLORS,
-            labels={"share_country_pct": "Share (%)", "field": ""},
-            text="count",
-        )
-        fig_fc.update_traces(
-            texttemplate="%{text:,d}",
-            textposition="outside",
+            marker=dict(color=df_fields["color"]),
             customdata=customdata_fc,
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "Share (vs this country's collaborations): %{x:.1f}%<br>"
                 "Co-publications: %{customdata[0]:,.0f}<br>"
-                "Average FWCI: %{customdata[1]:.2f}"
-                "<extra></extra>"
+                "Average FWCI: %{customdata[1]:.2f}<extra></extra>"
             ),
+            text=df_fields["count"],
+            textposition="outside",
         )
         fig_fc.update_layout(
             margin=dict(l=0, r=0, t=25, b=0),
-            legend_title_text="Domain",
+            xaxis_title="Share (%)",
+            yaxis_title="",
+            yaxis=dict(autorange="reversed"),
+            showlegend=False,
         )
         st.plotly_chart(fig_fc, use_container_width=True)
 
 with col_fi:
     st.markdown("#### By field – share of UPCité’s international collaborations")
-    if df_field.empty:
+    if df_fields.empty:
         st.info("No field-level data for this country.")
     else:
-        customdata_fi = df_field[["count", "fwci"]].to_numpy()
-        fig_fi = px.bar(
-            df_field,
-            x="share_intl_pct",
-            y="field",
+        customdata_fi = df_fields[["count", "fwci"]].to_numpy()
+        fig_fi = go.Figure()
+        fig_fi.add_bar(
+            x=df_fields["share_intl_pct"],
+            y=df_fields["Field"],
             orientation="h",
-            color="domain",
-            color_discrete_map=DOMAIN_COLORS,
-            labels={"share_intl_pct": "Share (%)", "field": ""},
-            text="count",
-        )
-        fig_fi.update_traces(
-            texttemplate="%{text:,d}",
-            textposition="outside",
+            marker=dict(color=df_fields["color"]),
             customdata=customdata_fi,
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "Share (vs all UPCité international co-publications in this field): "
                 "%{x:.1f}%<br>"
                 "Co-publications with this country: %{customdata[0]:,.0f}<br>"
-                "Average FWCI: %{customdata[1]:.2f}"
-                "<extra></extra>"
+                "Average FWCI: %{customdata[1]:.2f}<extra></extra>"
             ),
+            text=df_fields["count"],
+            textposition="outside",
         )
         fig_fi.update_layout(
             margin=dict(l=0, r=0, t=25, b=0),
-            legend_title_text="Domain",
+            xaxis_title="Share (%)",
+            yaxis_title="",
+            yaxis=dict(autorange="reversed"),
+            showlegend=False,
         )
         st.plotly_chart(fig_fi, use_container_width=True)
 
@@ -510,15 +493,6 @@ def make_subfield_df(row) -> pd.DataFrame:
     records = []
 
     for field in CANONICAL_FIELDS:
-        # Field ID appears in the column labels as '(id: XX)'; we don't need id,
-        # we just reuse the exact column names that exist in upcite_country.
-        # Example:
-        #   Copubs per subfield within "Agricultural and Biological Sciences" (id: 11)
-        #   Subfield share vs intl within "Agricultural and Biological Sciences" (id: 11)
-        #   Subfield share vs country within "Agricultural and Biological Sciences" (id: 11)
-        #   FWCI per subfield within "Agricultural and Biological Sciences" (id: 11)
-        #
-        # We'll look for any column starting with these patterns.
         base = f'within "{field}"'
         count_col = next(
             (c for c in row.index if c.startswith("Copubs per subfield") and base in c),
@@ -568,8 +542,9 @@ def make_subfield_df(row) -> pd.DataFrame:
     df = pd.DataFrame(records)
     if df.empty:
         return df
-    df["share_intl_pct"] = df["share_intl"] * 100
-    df["share_country_pct"] = df["share_country"] * 100
+
+    df["share_intl_pct"] = df["share_intl"] * 100.0
+    df["share_country_pct"] = df["share_country"] * 100.0
     # Order by largest share vs country first, then count
     df.sort_values(
         ["share_country_pct", "count"], ascending=[False, False], inplace=True
@@ -584,6 +559,7 @@ df_sub = make_subfield_df(row_c)
 if df_sub.empty:
     st.info("No subfield-level data for this country.")
 else:
+    # Add a domain marker with emojis
     df_sub_display = df_sub[
         [
             "domain",
@@ -594,9 +570,14 @@ else:
             "count",
             "fwci",
         ]
-    ].rename(
+    ].copy()
+
+    df_sub_display["Domain"] = df_sub_display["domain"].apply(
+        lambda d: f"{DOMAIN_EMOJI.get(d, '⬜')} {d}"
+    )
+
+    df_sub_display = df_sub_display.rename(
         columns={
-            "domain": "Domain",
             "field": "Field",
             "subfield": "Subfield",
             "share_country_pct": "Share vs country (%)",
@@ -605,6 +586,19 @@ else:
             "fwci": "FWCI",
         }
     )
+
+    # Reorder columns with Domain first
+    df_sub_display = df_sub_display[
+        [
+            "Domain",
+            "Field",
+            "Subfield",
+            "Share vs country (%)",
+            "Share vs all UPCité intl (%)",
+            "Co-publications",
+            "FWCI",
+        ]
+    ]
 
     st.dataframe(
         df_sub_display,
@@ -615,16 +609,18 @@ else:
                 "Share vs country (%)",
                 min_value=0.0,
                 max_value=100.0,
-                format="%.0f%%",
+                format="%.1f%%",  # 1 decimal
                 help="Share of this country's co-publications with UPCité in this subfield.",
             ),
             "Share vs all UPCité intl (%)": st.column_config.ProgressColumn(
                 "Share vs all UPCité intl (%)",
                 min_value=0.0,
                 max_value=100.0,
-                format="%.0f%%",
-                help="Share of all UPCité international co-publications in this subfield "
-                "that involve this country.",
+                format="%.1f%%",  # 1 decimal
+                help=(
+                    "Share of all UPCité international co-publications in this subfield "
+                    "that involve this country."
+                ),
             ),
             "Co-publications": st.column_config.NumberColumn(
                 "Co-publications", format="%d"
@@ -644,37 +640,74 @@ df_country_partners = df_partners[df_partners["Partner country"] == selected_cou
 if df_country_partners.empty:
     st.info("No partner institutions found for this country in the dataset.")
 else:
-    table_cols = [
-        "Partner name",
-        "Partner type",
-        "Count of co-publications",
-        "Share of UPCité's production",
-        "Share of Partner's total production",
-        "average FWCI",
-    ]
-    df_pt = df_country_partners[table_cols].sort_values(
-        "Count of co-publications", ascending=False
+    # Filter by partner type
+    partner_types = sorted(df_country_partners["Partner type"].dropna().unique())
+    selected_types = st.multiselect(
+        "Filter by partner type",
+        options=partner_types,
+        default=partner_types,
     )
 
-    st.dataframe(
-        df_pt,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "Share of UPCité's production": st.column_config.ProgressColumn(
-                "Share of UPCité's production",
-                min_value=0.0,
-                max_value=1.0,
-                format="%.2f%%",
-            ),
-            "Share of Partner's total production": st.column_config.ProgressColumn(
-                "Share of Partner's total production",
-                min_value=0.0,
-                max_value=1.0,
-                format="%.2f%%",
-            ),
-            "average FWCI": st.column_config.NumberColumn(
-                "Average FWCI", format="%.2f"
-            ),
-        },
-    )
+    if selected_types:
+        df_country_partners = df_country_partners[
+            df_country_partners["Partner type"].isin(selected_types)
+        ]
+
+    if df_country_partners.empty:
+        st.info("No partner institutions match the selected type(s).")
+    else:
+        # Prepare table + convert shares to % for nicer display
+        base_cols = [
+            "Partner name",
+            "Partner type",
+            "Count of co-publications",
+            "Share of UPCité's production",
+            "Share of Partner's total production",
+            "average FWCI",
+        ]
+        df_pt = df_country_partners[base_cols].copy()
+
+        df_pt["Share of UPCité's production (%)"] = (
+            df_pt["Share of UPCité's production"] * 100.0
+        )
+        df_pt["Share of Partner's total production (%)"] = (
+            df_pt["Share of Partner's total production"] * 100.0
+        )
+
+        df_pt = df_pt.sort_values(
+            "Count of co-publications", ascending=False
+        )
+
+        df_pt_display = df_pt[
+            [
+                "Partner name",
+                "Partner type",
+                "Count of co-publications",
+                "Share of UPCité's production (%)",
+                "Share of Partner's total production (%)",
+                "average FWCI",
+            ]
+        ]
+
+        st.dataframe(
+            df_pt_display,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Share of UPCité's production (%)": st.column_config.ProgressColumn(
+                    "Share of UPCité's production",
+                    min_value=0.0,
+                    max_value=100.0,
+                    format="%.2f%%",
+                ),
+                "Share of Partner's total production (%)": st.column_config.ProgressColumn(
+                    "Share of Partner's total production",
+                    min_value=0.0,
+                    max_value=100.0,
+                    format="%.2f%%",
+                ),
+                "average FWCI": st.column_config.NumberColumn(
+                    "Average FWCI", format="%.2f"
+                ),
+            },
+        )
