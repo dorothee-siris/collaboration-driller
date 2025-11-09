@@ -459,11 +459,11 @@ with col_fc:
         fig_fc = px.bar(
             df_fields,
             x="share_country_pct",
-            y="field",
+            y="Field",  # <-- capital F
             orientation="h",
             color="domain",
             color_discrete_map=DOMAIN_COLORS,
-            labels={"share_country_pct": "Share (%)", "field": ""},
+            labels={"share_country_pct": "Share (%)", "Field": ""},
         )
 
         fig_fc.update_traces(
@@ -494,7 +494,7 @@ with col_fc:
         fig_fc.update_yaxes(tickfont=dict(size=13))
 
         # Counts in the gutter (between y-axis and x=0)
-        for field_name, cnt in zip(df_fields["field"], df_fields["count"]):
+        for field_name, cnt in zip(df_fields["Field"], df_fields["count"]):
             fig_fc.add_annotation(
                 x=-gutter_c * 0.98,
                 y=field_name,
@@ -531,7 +531,7 @@ with col_fi:
             orientation="h",
             color="domain",
             color_discrete_map=DOMAIN_COLORS,
-            labels={"share_intl_pct": "Share (%)", "field": ""},
+            labels={"share_intl_pct": "Share (%)", "Field": ""},
         )
 
         fig_fi.update_traces(
@@ -560,7 +560,7 @@ with col_fi:
         )
         fig_fi.update_yaxes(tickfont=dict(size=13))
 
-        for field_name, cnt in zip(df_fields["field"], df_fields["count"]):
+        for field_name, cnt in zip(df_fields["Field"], df_fields["count"]):
             fig_fi.add_annotation(
                 x=-gutter_i * 0.98,
                 y=field_name,
