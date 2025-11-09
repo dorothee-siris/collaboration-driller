@@ -78,7 +78,7 @@ st.markdown("---")
 # ---------------------------------------------------------------------
 # Filters for table + bubble chart
 # ---------------------------------------------------------------------
-st.subheader("Top partners – overview table")
+st.subheader("Top partners (>20 co-publications over 2020-24) – overview table")
 
 filter_col1, filter_col2 = st.columns([1, 2])
 
@@ -221,6 +221,10 @@ else:
     scatter_df["y"] = scatter_df["Share of UPCité's production"].fillna(0.0)
     scatter_df["average FWCI"] = scatter_df["average FWCI"].fillna(0.0)
 
+    # Extra columns for hover (keep raw shares as decimals)
+    scatter_df["share_upcite"] = scatter_df["Share of UPCité's production"].fillna(0.0)
+    scatter_df["share_partner"] = scatter_df["Share of Partner's total production"].fillna(0.0)
+
     # Category for coloring: France / International / No country
     def geo_category(country: str) -> str:
         if country == "France":
@@ -254,11 +258,22 @@ else:
             "No country": "#888888",
         },
         hover_name="Partner name",
+        # custom_data order:
+        # 0 country
+        # 1 type
+        # 2 co-pubs
+        # 3 FWCI
+        # 4 share_upcite (UPCité's share)
+        # 5 share_partner (partner's share)
+        # 6 partner total output
         custom_data=[
             "Partner country",
-            "Count of co-publications",
             "Partner type",
+            "Count of co-publications",
             "average FWCI",
+            "share_upcite",
+            "share_partner",
+            size_col,
         ],
         labels={
             "x": "Share of partner's total production",
@@ -273,16 +288,17 @@ else:
         )
     )
 
-    # Custom hovertemplate
+    # Custom hovertemplate (shares in %, plus partner total)
     fig.update_traces(
         hovertemplate=(
             "<b>%{hovertext}</b><br><br>"
             "country: %{customdata[0]}<br>"
-            "co-publications: %{customdata[1]:,}<br>"
-            "type: %{customdata[2]}<br>"
-            "FWCI: %{customdata[3]:.2f}<br>"
-            "share of partner's total production: %{x:.1%}<br>"
-            "share of UPCité's production: %{x:.1%}<extra></extra>"
+            "type: %{customdata[1]}<br>"
+            "co-publications with UPCité (2020–24): %{customdata[2]:,}<br>"
+            "share of UPCité's total output: %{customdata[4]:.1%}<br>"
+            "average FWCI: %{customdata[3]:.2f}<br>"
+            "partner's totals (2020–24): %{customdata[6]:,}<br>"
+            "share of partner's total output: %{customdata[5]:.1%}<extra></extra>"
         )
     )
 
@@ -306,4 +322,3 @@ else:
     )
 
     st.plotly_chart(fig, use_container_width=True)
-
