@@ -358,7 +358,7 @@ else:
 
     # Make the figure a bit less tall and reduce extra margins
     fig_map.update_layout(
-        margin=dict(l=20, r=20, t=20, b=20),
+        margin=dict(l=0, r=0, t=0, b=0),
         coloraxis_colorbar=dict(title=metric_label),
         height=650,   # was 650 – this shrinks the big white band
     )
