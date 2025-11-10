@@ -1,22 +1,31 @@
 # pages/4_Partner_drilldown.py
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
-from typing import List, Any, Dict
+from typing import Any, Dict, List, Tuple
 
+import numpy as np
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
 from lib.taxonomy import (
+    build_taxonomy_lookups,
+    canonical_field_order,
+    get_domain_color,
+    get_domain_for_field,
     get_field_color,
     get_subfield_color,
 )
 
 # ---------------------------------------------------------------------
-# Paths & loaders
+# Paths & basic config
 # ---------------------------------------------------------------------
+st.set_page_config(layout="wide")
+
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 LIB_DIR = BASE_DIR / "lib"
@@ -24,7 +33,56 @@ LIB_DIR = BASE_DIR / "lib"
 if str(LIB_DIR) not in sys.path:
     sys.path.append(str(LIB_DIR))
 
+# ---------------------------------------------------------------------
+# Global taxonomy helpers
+# ---------------------------------------------------------------------
+_TAX = build_taxonomy_lookups()
 
+# Canonical field order & subfields
+CANONICAL_FIELDS = canonical_field_order()
+SUBFIELDS_BY_FIELD: Dict[str, List[str]] = _TAX["subfields_by_field"]
+
+# Field IDs → names (for mapping pipe-series which are in field-id order)
+FIELD_ID_TO_NAME: Dict[int, str] = {
+    int(fid): name for fid, name in _TAX["field_id_to_name"].items()
+}
+FIELD_IDS_BY_ID_ORDER: List[int] = sorted(FIELD_ID_TO_NAME.keys())
+FIELD_NAMES_BY_ID: List[str] = [FIELD_ID_TO_NAME[i] for i in FIELD_IDS_BY_ID_ORDER]
+
+# Domain metadata from topics (ordered by domain_id)
+@st.cache_data
+def load_topics() -> pd.DataFrame:
+    return pd.read_parquet(DATA_DIR / "all_topics.parquet")
+
+
+@st.cache_data
+def get_domain_meta() -> Tuple[List[int], List[str]]:
+    topics = load_topics()
+    meta = (
+        topics[["domain_id", "domain_name"]]
+        .drop_duplicates()
+        .sort_values("domain_id")
+    )
+    dom_ids = meta["domain_id"].astype(int).tolist()
+    dom_names = meta["domain_name"].tolist()
+    return dom_ids, dom_names
+
+
+DOMAIN_IDS, DOMAIN_NAMES_BY_ID = get_domain_meta()
+DOMAIN_COLORS = {name: get_domain_color(name) for name in DOMAIN_NAMES_BY_ID}
+
+# Emoji marker for domains (for tables)
+DOMAIN_EMOJI = {
+    "Health Sciences": "🟥",
+    "Life Sciences": "🟩",
+    "Physical Sciences": "🟦",
+    "Social Sciences": "🟨",
+    "Other": "⬜",
+}
+
+# ---------------------------------------------------------------------
+# Data loaders
+# ---------------------------------------------------------------------
 @st.cache_data
 def load_core() -> pd.DataFrame:
     return pd.read_parquet(DATA_DIR / "upcite_core.parquet")
@@ -36,12 +94,16 @@ def load_partners() -> pd.DataFrame:
 
 
 @st.cache_data
-def load_topics() -> pd.DataFrame:
-    return pd.read_parquet(DATA_DIR / "all_topics.parquet")
+def get_total_upcite_international_copubs() -> int:
+    """Total number of UPCité publications that are tagged as international."""
+    core = load_core()
+    if "is_international" not in core.columns:
+        return 0
+    return int(core.loc[core["is_international"] == True].shape[0])
 
 
 # ---------------------------------------------------------------------
-# Helpers
+# Generic helpers
 # ---------------------------------------------------------------------
 def parse_pipe_ints(s: Any) -> List[int]:
     if pd.isna(s) or s == "":
@@ -54,228 +116,631 @@ def parse_pipe_ints(s: Any) -> List[int]:
         else:
             try:
                 vals.append(int(p))
-            except ValueError:
+            except Exception:
                 vals.append(0)
     return vals
 
 
-@st.cache_data
-def build_taxonomy_from_topics() -> Dict:
-    topics = load_topics()
+def parse_pipe_floats(s: Any) -> List[float]:
+    if pd.isna(s) or s == "":
+        return []
+    vals: List[float] = []
+    for p in str(s).split("|"):
+        p = p.strip()
+        if not p:
+            vals.append(0.0)
+        else:
+            try:
+                vals.append(float(p.replace(",", ".")))
+            except Exception:
+                vals.append(0.0)
+    return vals
 
-    field_meta = (
-        topics[["field_id", "field_name", "domain_name"]]
-        .drop_duplicates()
-        .sort_values("field_id")
+
+def pad_to_length(lst: List[Any], n: int, pad_value: Any) -> List[Any]:
+    lst = list(lst)
+    if len(lst) < n:
+        lst += [pad_value] * (n - len(lst))
+    return lst[:n]
+
+
+def parse_partner_year_domain_counts(raw: Any) -> pd.DataFrame:
+    """
+    Parse strings like:
+      '2020 (1480 ; 936 ; 3603 ; 2122) | 2021 (...) | ...'
+    into a long DataFrame with columns: year, domain, copubs.
+    Numbers are ordered by domain_id ascending.
+    """
+    if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+        return pd.DataFrame(columns=["year", "domain", "copubs"])
+
+    text = str(raw)
+    parts = [p.strip() for p in text.split("|") if p.strip()]
+    records: List[Dict[str, Any]] = []
+
+    for part in parts:
+        m = re.match(r"(\d{4})\s*\(([^)]*)\)", part)
+        if not m:
+            continue
+        year = int(m.group(1))
+        nums = [n.strip() for n in m.group(2).split(";") if n.strip()]
+        nums_int = [int(n) for n in nums]
+
+        n = min(len(nums_int), len(DOMAIN_NAMES_BY_ID))
+        for i in range(n):
+            records.append(
+                {
+                    "year": year,
+                    "domain": DOMAIN_NAMES_BY_ID[i],
+                    "copubs": nums_int[i],
+                }
+            )
+
+    return pd.DataFrame(records)
+
+
+def build_partner_field_df(row: pd.Series) -> pd.DataFrame:
+    """
+    One row per field in canonical order, with:
+      - count: co-publications in this field with the partner
+      - fwci: field-level FWCI of those co-publications
+      - share_with_partner: share of all co-publications with this partner
+      - rel_vs_upcite: Relative share per field vs UPCité total
+      - rel_vs_partner: Relative share per field vs Partner total
+    """
+    counts = parse_pipe_ints(row.get("Copubs per field", ""))
+    fwci_vals = parse_pipe_floats(row.get("FWCI per field", ""))
+    rel_vs_upcite = parse_pipe_floats(row.get("Relative share per field vs UPCité total", ""))
+    rel_vs_partner = parse_pipe_floats(row.get("Relative share per field vs Partner total", ""))
+
+    n = len(counts)
+    fwci_vals = pad_to_length(fwci_vals, n, 0.0)
+    rel_vs_upcite = pad_to_length(rel_vs_upcite, n, 0.0)
+    rel_vs_partner = pad_to_length(rel_vs_partner, n, 0.0)
+
+    # Partner series follow ascending field_id order (11..36)
+    field_ids = FIELD_IDS_BY_ID_ORDER[:n]
+    field_names = [FIELD_ID_TO_NAME[i] for i in field_ids]
+
+    total_copubs = float(row.get("Count of co-publications", 0) or 0)
+    if total_copubs <= 0:
+        # Avoid division by zero; if no co-pubs, shares are 0
+        share_with_partner = [0.0] * n
+    else:
+        share_with_partner = [c / total_copubs for c in counts]
+
+    df_raw = pd.DataFrame(
+        {
+            "Field": field_names,
+            "count": counts,
+            "fwci": fwci_vals,
+            "share_with_partner": share_with_partner,
+            "rel_vs_upcite": rel_vs_upcite,
+            "rel_vs_partner": rel_vs_partner,
+        }
     )
-    field_ids = field_meta["field_id"].astype(int).tolist()
-    field_names = field_meta["field_name"].tolist()
-    field_domain_by_name = dict(zip(field_names, field_meta["domain_name"]))
 
-    sub_meta = (
-        topics[
-            ["field_id", "field_name", "subfield_id", "subfield_name", "domain_name"]
-        ]
-        .drop_duplicates()
-        .sort_values(["field_id", "subfield_id"])
+    # Reindex onto canonical field order so charts align across partners
+    df = (
+        df_raw.set_index("Field")
+        .reindex(CANONICAL_FIELDS, fill_value=0)
+        .reset_index()
+        .rename(columns={"index": "Field"})
     )
-    field_to_subnames: Dict[int, List[str]] = {}
-    subfield_domain_by_name: Dict[str, str] = {}
-    for (fid, _fname), group in sub_meta.groupby(["field_id", "field_name"]):
-        subnames = group["subfield_name"].tolist()
-        field_to_subnames[int(fid)] = subnames
-        for sn, dn in zip(group["subfield_name"], group["domain_name"]):
-            subfield_domain_by_name[str(sn)] = str(dn)
 
-    return {
-        "field_ids": field_ids,
-        "field_names": field_names,
-        "field_domain_by_name": field_domain_by_name,
-        "field_to_subnames": field_to_subnames,
-        "subfield_domain_by_name": subfield_domain_by_name,
-    }
+    df["share_with_partner_pct"] = df["share_with_partner"] * 100.0
+    df["rel_vs_upcite_pct"] = df["rel_vs_upcite"] * 100.0
+    df["rel_vs_partner_pct"] = df["rel_vs_partner"] * 100.0
+    df["domain"] = df["Field"].apply(get_domain_for_field)
+    df["color"] = df["Field"].apply(get_field_color)
+    return df
+
+
+def make_partner_subfield_df(row: pd.Series) -> pd.DataFrame:
+    """
+    Build a long table of subfields for this partner with:
+      - subfield co-pubs
+      - share within this partner's co-publications
+      - relative share vs UPCité total (subfield)
+      - relative share vs partner total (subfield)
+      - partner's total pubs in that subfield
+      - FWCI
+    """
+    total_copubs = float(row.get("Count of co-publications", 0) or 0)
+    records: List[Dict[str, Any]] = []
+
+    for field in CANONICAL_FIELDS:
+        base = f'within "{field}"'
+
+        count_col = next(
+            (c for c in row.index if c.startswith("Copubs per subfield") and base in c),
+            None,
+        )
+        fwci_col = next(
+            (c for c in row.index if c.startswith("FWCI per subfield") and base in c),
+            None,
+        )
+        share_upcite_col = next(
+            (
+                c
+                for c in row.index
+                if c.startswith("Relative share per subfield")
+                and base in c
+                and "vs Partner total" not in c
+            ),
+            None,
+        )
+        share_partner_col = next(
+            (
+                c
+                for c in row.index
+                if c.startswith("Relative share per subfield")
+                and base in c
+                and "vs Partner total" in c
+            ),
+            None,
+        )
+        partner_total_col = next(
+            (
+                c
+                for c in row.index
+                if c.startswith("Pubs per subfield")
+                and base in c
+                and "(partner total)" in c
+            ),
+            None,
+        )
+
+        if not count_col or not fwci_col or not share_upcite_col or not share_partner_col:
+            continue
+
+        counts = parse_pipe_ints(row[count_col])
+        fwcis = parse_pipe_floats(row[fwci_col])
+        shares_upcite = parse_pipe_floats(row[share_upcite_col])
+        shares_partner = parse_pipe_floats(row[share_partner_col])
+        partner_totals = (
+            parse_pipe_ints(row[partner_total_col]) if partner_total_col in row.index else []
+        )
+
+        subfields = SUBFIELDS_BY_FIELD.get(field, [])
+        n = min(
+            len(counts),
+            len(fwcis),
+            len(shares_upcite),
+            len(shares_partner),
+            len(subfields),
+        )
+        partner_totals = pad_to_length(partner_totals, n, 0)
+
+        domain = get_domain_for_field(field)
+
+        for i in range(n):
+            c = counts[i]
+            if c <= 0:
+                continue
+            s_mix = (c / total_copubs) if total_copubs > 0 else 0.0
+            records.append(
+                {
+                    "Domain": domain,
+                    "Field": field,
+                    "Subfield": subfields[i],
+                    "copubs": c,
+                    "share_mix": s_mix,
+                    "share_vs_partner_total": shares_partner[i],
+                    "share_vs_upcite_total": shares_upcite[i],
+                    "partner_total_subfield": partner_totals[i],
+                    "fwci": fwcis[i],
+                }
+            )
+
+    df = pd.DataFrame(records)
+    if df.empty:
+        return df
+
+    # Sort: biggest share within co-publications, then count
+    df.sort_values(["share_mix", "copubs"], ascending=[False, False], inplace=True)
+    return df
 
 
 # ---------------------------------------------------------------------
-# Page
+# Page layout
 # ---------------------------------------------------------------------
 st.title("Partner drilldown")
 
-core_df = load_core()
 partners_df = load_partners()
-tax_meta = build_taxonomy_from_topics()
 
+# 1) Search & selection ------------------------------------------------
 search = st.text_input("Search partner by name (min. 2 characters)", "")
-matches = partners_df["Partner name"].dropna().unique()
+partner_names = partners_df["Partner name"].dropna().unique()
 
 if search and len(search.strip()) >= 2:
-    matches = [m for m in matches if search.lower() in m.lower()]
+    partner_names = [n for n in partner_names if search.lower() in n.lower()]
 
-if len(matches) == 0:
+if len(partner_names) == 0:
     st.info("No matching partners found.")
+    st.stop()
+
+selected_partner = st.selectbox(
+    "Select a partner",
+    sorted(partner_names),
+    index=None,
+    placeholder="Choose a partner to explore",
+)
+
+if selected_partner is None:
+    st.info("Select a partner above to display detailed indicators.")
+    st.stop()
+
+partner_row = partners_df.loc[partners_df["Partner name"] == selected_partner]
+if partner_row.empty:
+    st.warning("No detailed data available for this partner.")
+    st.stop()
+
+partner_row = partner_row.iloc[0]
+
+# ---------------------------------------------------------------------
+# 2) Topline metrics
+# ---------------------------------------------------------------------
+pname = partner_row["Partner name"]
+pcountry = partner_row.get("Partner country", "")
+ptype = partner_row.get("Partner type", "")
+pid = str(partner_row.get("Partner ID", ""))
+
+st.markdown(
+    f"**{pname}**  \n"
+    f"{pcountry} – {ptype if ptype else 'Unknown type'}  \n"
+    f"`OpenAlex ID: {pid}`"
+)
+
+copubs = int(partner_row.get("Count of co-publications", 0) or 0)
+partner_total_output = int(partner_row.get("Partner's total output (2020-24)", 0) or 0)
+share_upcite_total = float(partner_row.get("Share of UPCité's production", 0.0) or 0.0)
+share_partner_total = float(partner_row.get("Share of Partner's total production", 0.0) or 0.0)
+avg_fwci = float(partner_row.get("average FWCI", 0.0) or 0.0)
+
+total_upcite_intl = get_total_upcite_international_copubs()
+share_upcite_intl = (copubs / total_upcite_intl) if total_upcite_intl > 0 else 0.0
+
+col1, col2, col3, col4, col5 = st.columns(5)
+
+with col1:
+    st.metric("Co-publications with UPCité (2020–24)", f"{copubs:,}")
+
+with col2:
+    st.metric(
+        "Share of UPCité's total output",
+        f"{share_upcite_total * 100:.2f}%",
+    )
+
+with col3:
+    st.metric(
+        "Share of partner's total output",
+        f"{share_partner_total * 100:.2f}%",
+    )
+
+with col4:
+    st.metric(
+        "Share of UPCité's international collaborations",
+        f"{share_upcite_intl * 100:.2f}%",
+    )
+
+with col5:
+    st.metric("Average FWCI of co-publications", f"{avg_fwci:.2f}")
+
+# ---------------------------------------------------------------------
+# 3) Yearly distribution by domain
+# ---------------------------------------------------------------------
+st.markdown("### Yearly distribution by domain")
+
+df_year_dom = parse_partner_year_domain_counts(partner_row.get("Copubs per year and domain"))
+df_year_dom = df_year_dom[df_year_dom["copubs"] > 0]
+
+if df_year_dom.empty:
+    st.info("No yearly/domain breakdown is available for this partner.")
 else:
-    selected_partner = st.selectbox("Select a partner", sorted(matches))
-
-    partner_row = partners_df[
-        partners_df["Partner name"] == selected_partner
-    ].iloc[0]
-
-    pname = partner_row["Partner name"]
-    pcountry = partner_row["Partner country"]
-    ptype = partner_row.get("Partner type", "")
-    pid = str(partner_row.get("Partner ID", ""))
-
-    st.markdown(
-        f"**{pname}** – {pcountry}  ({ptype})  \n"
-        f"Partner ID: `{pid}`"
+    fig_year_dom = px.bar(
+        df_year_dom,
+        x="year",
+        y="copubs",
+        color="domain",
+        color_discrete_map=DOMAIN_COLORS,
+        barmode="stack",
+        labels={
+            "year": "Year",
+            "copubs": "Number of co-publications",
+            "domain": "",
+        },
     )
-
-    copubs = partner_row["Count of co-publications"]
-    tot_output = partner_row["Partner's total output (2020-24)"]
-    share_upcite = partner_row["Share of UPCité's production"]
-    share_partner = partner_row["Share of Partner's total production"]
-    avg_fwci = partner_row["average FWCI"]
-
-    st.markdown(
-        f"- Co-publications with UPCité: **{copubs:,}**  \n"
-        f"- Partner's total output (2020–24): **{tot_output:,}**  \n"
-        f"- Share of UPCité's production: **{share_upcite:.3f}**  \n"
-        f"- Share of partner's total production: **{share_partner:.3f}**  \n"
-        f"- Average FWCI of co-publications: **{avg_fwci:.2f}**"
+    fig_year_dom.update_layout(
+        margin=dict(l=0, r=10, t=10, b=10),
+        showlegend=True,
+        height=380,
     )
+    st.plotly_chart(fig_year_dom, width="stretch")
 
-    # ----------------- Distribution across fields -------------------
-    st.markdown("### Distribution of co-publications across fields")
+# ---------------------------------------------------------------------
+# 4) Distribution by field: shares & FWCI
+# ---------------------------------------------------------------------
+st.markdown("### Thematic profile of collaborations")
 
-    field_counts = parse_pipe_ints(partner_row["Copubs per field"])
-    field_ids = tax_meta["field_ids"]
-    field_names = tax_meta["field_names"]
-    field_domain_by_name = tax_meta["field_domain_by_name"]
+df_fields = build_partner_field_df(partner_row)
 
-    field_rows = []
-    for fid, fname, cnt in zip(field_ids, field_names, field_counts):
-        if cnt > 0:
-            dom = field_domain_by_name.get(fname, "Other")
-            field_rows.append(
-                {
-                    "Field": fname,
-                    "Count": cnt,
-                    "Domain": dom,
-                    "Color": get_field_color(fname),
-                }
-            )
+col_share, col_fwci = st.columns(2)
 
-    if field_rows:
-        fdf = pd.DataFrame(field_rows).sort_values("Count", ascending=True)
-        fig_f = go.Figure()
-        fig_f.add_trace(
-            go.Bar(
-                x=fdf["Count"],
-                y=fdf["Field"],
-                orientation="h",
-                marker_color=fdf["Color"],
-                text=fdf["Count"],
-                textposition="outside",
-            )
-        )
-        fig_f.update_layout(
-            height=400,
-            margin=dict(l=0, r=10, t=10, b=10),
-            xaxis_title="Co-publications",
-        )
-        st.plotly_chart(fig_f, use_container_width=True)
+with col_share:
+    st.markdown(
+        "#### Distribution by field  \n"
+        "among co-publications with this partner"
+    )
+    if df_fields.empty or df_fields["count"].sum() == 0:
+        st.info("No field-level co-publications recorded for this partner.")
     else:
-        st.info("This partner has no field-level co-publications recorded.")
+        customdata_share = df_fields[["count", "fwci"]].to_numpy()
 
-    # ----------------- Top subfields -------------------
-    st.markdown("### Top 30 subfields (by co-publications)")
+        fig_share = px.bar(
+            df_fields,
+            x="share_with_partner_pct",
+            y="Field",
+            orientation="h",
+            color="domain",
+            color_discrete_map=DOMAIN_COLORS,
+            labels={"share_with_partner_pct": "Share (%)", "Field": ""},
+        )
 
-    field_to_subnames = tax_meta["field_to_subnames"]
-    subfield_domain_by_name = tax_meta["subfield_domain_by_name"]
+        fig_share.update_traces(
+            customdata=customdata_share,
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Share of this partner's co-publications: %{x:.1f}%<br>"
+                "Co-publications: %{customdata[0]:,.0f}<br>"
+                "Average FWCI: %{customdata[1]:.2f}"
+                "<extra></extra>"
+            ),
+        )
 
-    sub_rows = []
-    for fid, fname in zip(field_ids, field_names):
-        col_sub = f'Copubs per subfield within "{fname}" (id: {fid})'
-        if col_sub not in partner_row.index:
-            continue
-        counts = parse_pipe_ints(partner_row[col_sub])
-        subnames = field_to_subnames.get(fid, [])
-        for sn, cnt in zip(subnames, counts):
-            if cnt <= 0:
-                continue
-            dom = subfield_domain_by_name.get(sn, "Other")
-            sub_rows.append(
-                {
-                    "Subfield": sn,
-                    "Field": fname,
-                    "Domain": dom,
-                    "Count": cnt,
-                    "Color": get_subfield_color(sn),
-                }
+        max_share = float(df_fields["share_with_partner_pct"].max() or 0.0)
+        if max_share <= 0:
+            max_share = 1.0
+        gutter = max_share * 0.20
+
+        fig_share.update_xaxes(
+            range=[-gutter, max_share * 1.05],
+            showgrid=True,
+            gridcolor="#e0e0e0",
+            ticksuffix="%",
+            tickfont=dict(size=12),
+        )
+        fig_share.update_yaxes(tickfont=dict(size=13))
+
+        # Counts in gutter
+        for field_name, cnt in zip(df_fields["Field"], df_fields["count"]):
+            fig_share.add_annotation(
+                x=-gutter * 0.98,
+                y=field_name,
+                text=f"{int(cnt)}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="middle",
+                font=dict(size=12, color="#444"),
             )
 
-    if sub_rows:
-        sdf = (
-            pd.DataFrame(sub_rows)
-            .sort_values("Count", ascending=True)
-            .tail(30)
-        )
-        fig_s = go.Figure()
-        fig_s.add_trace(
-            go.Bar(
-                x=sdf["Count"],
-                y=sdf["Subfield"],
-                orientation="h",
-                marker_color=sdf["Color"],
-                text=sdf["Count"],
-                textposition="outside",
-            )
-        )
-        fig_s.update_layout(
+        fig_share.update_layout(
+            margin=dict(l=0, r=10, t=25, b=10),
+            showlegend=False,
             height=600,
-            margin=dict(l=0, r=10, t=10, b=10),
-            xaxis_title="Co-publications",
         )
-        st.plotly_chart(fig_s, use_container_width=True)
-    else:
-        st.info("No subfield-level co-publications available for this partner.")
 
-    # ----------------- List of co-publications -------------------
-    st.markdown("### List of co-publications (sample)")
+        st.plotly_chart(fig_share, width="stretch")
 
-    # Use Partner ID inside lineage_affiliations
-    core_match = core_df[
-        core_df["lineage_affiliations"]
-        .astype(str)
-        .str.contains(pid, na=False)
-    ].copy()
-
-    core_match = core_match.sort_values("publication_year", ascending=False)
-
-    cols = [
-        "id",
-        "title",
-        "publication_year",
-        "fwci",
-        "cited_by_count",
-        "domain_name",
-        "field_name",
-        "subfield_name",
-        "topic_name",
-    ]
-
-    st.caption("Showing up to 50 most recent co-publications below:")
-    st.dataframe(core_match[cols].head(50), use_container_width=True)
-
-    csv = core_match[cols].to_csv(index=False).encode("utf-8-sig")
-    safe_name = (
-        pname.replace("/", "_")
-        .replace("\\", "_")
-        .replace(" ", "_")
+with col_fwci:
+    st.markdown(
+        "#### Distribution by field  \n"
+        "Average FWCI of co-publications"
     )
-    st.download_button(
-        "⬇️ Download all co-publications as CSV",
-        data=csv,
-        file_name=f"upcite_copubs_{safe_name}.csv",
-        mime="text/csv",
+    if df_fields.empty or df_fields["count"].sum() == 0:
+        st.info("No field-level co-publications recorded for this partner.")
+    else:
+        customdata_fwci = df_fields[["count", "share_with_partner_pct"]].to_numpy()
+
+        fig_fwci = px.bar(
+            df_fields,
+            x="fwci",
+            y="Field",
+            orientation="h",
+            color="domain",
+            color_discrete_map=DOMAIN_COLORS,
+            labels={"fwci": "Average FWCI", "Field": ""},
+        )
+
+        fig_fwci.update_traces(
+            customdata=customdata_fwci,
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Average FWCI: %{x:.2f}<br>"
+                "Co-publications: %{customdata[0]:,.0f}<br>"
+                "Share of this partner's co-publications: %{customdata[1]:.1f}%"
+                "<extra></extra>"
+            ),
+        )
+
+        max_fwci = float(df_fields["fwci"].max() or 0.0)
+        if max_fwci <= 0:
+            max_fwci = 1.0
+        gutter2 = max_fwci * 0.20
+
+        fig_fwci.update_xaxes(
+            range=[-gutter2, max_fwci * 1.15],
+            showgrid=True,
+            gridcolor="#e0e0e0",
+            tickfont=dict(size=12),
+        )
+        fig_fwci.update_yaxes(tickfont=dict(size=13))
+
+        for field_name, cnt in zip(df_fields["Field"], df_fields["count"]):
+            fig_fwci.add_annotation(
+                x=-gutter2 * 0.98,
+                y=field_name,
+                text=f"{int(cnt)}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="middle",
+                font=dict(size=12, color="#444"),
+            )
+
+        fig_fwci.update_layout(
+            margin=dict(l=0, r=10, t=25, b=10),
+            showlegend=False,
+            height=600,
+        )
+
+        st.plotly_chart(fig_fwci, width="stretch")
+
+# ---------------------------------------------------------------------
+# 5) Strategic weight per field (bubble chart)
+# ---------------------------------------------------------------------
+st.markdown("### Strategic weight of co-publications by field")
+
+df_bub = df_fields[df_fields["count"] > 0].copy()
+if df_bub.empty:
+    st.info("No fields with co-publications to display.")
+else:
+    # Limit to fields where either share vs UPCité or share vs partner total is > 0
+    df_bub = df_bub[
+        (df_bub["rel_vs_upcite_pct"] > 0) | (df_bub["rel_vs_partner_pct"] > 0)
+    ]
+    if df_bub.empty:
+        st.info("No non-zero strategic weights available for this partner.")
+    else:
+        max_val = max(
+            float(df_bub["rel_vs_upcite_pct"].max() or 0.0),
+            float(df_bub["rel_vs_partner_pct"].max() or 0.0),
+        )
+        if max_val <= 0:
+            max_val = 1.0
+        max_val *= 1.05
+
+        fig_bub = px.scatter(
+            df_bub,
+            x="rel_vs_upcite_pct",
+            y="rel_vs_partner_pct",
+            size="fwci",  # bubble size = FWCI
+            size_max=40,
+            color="domain",
+            color_discrete_map=DOMAIN_COLORS,
+            hover_name="Field",
+            labels={
+                "rel_vs_upcite_pct": "Share vs UPCité total in this field (%)",
+                "rel_vs_partner_pct": "Share vs partner total in this field (%)",
+                "fwci": "Average FWCI",
+                "domain": "",
+            },
+        )
+
+        fig_bub.update_traces(
+            hovertemplate=(
+                "<b>%{hovertext}</b><br>"
+                "Share vs UPCité total: %{x:.2f}%<br>"
+                "Share vs partner total: %{y:.2f}%<br>"
+                "Average FWCI: %{marker.size:.2f}<br>"
+                "Co-publications: %{customdata[0]:,.0f}"
+                "<extra></extra>"
+            ),
+            customdata=df_bub[["count"]].to_numpy(),
+        )
+
+        # y = x diagonal
+        fig_bub.add_shape(
+            type="line",
+            x0=0,
+            y0=0,
+            x1=max_val,
+            y1=max_val,
+            line=dict(color="#444", dash="dash"),
+        )
+
+        fig_bub.update_xaxes(range=[0, max_val], showgrid=True, gridcolor="#eee")
+        fig_bub.update_yaxes(range=[0, max_val], showgrid=True, gridcolor="#eee")
+
+        fig_bub.update_layout(
+            margin=dict(l=0, r=10, t=25, b=10),
+            height=520,
+            legend_title_text="",
+        )
+
+        st.plotly_chart(fig_bub, width="stretch")
+
+# ---------------------------------------------------------------------
+# 6) Subfield table
+# ---------------------------------------------------------------------
+st.markdown("### Subfield detail")
+
+df_sub = make_partner_subfield_df(partner_row)
+
+if df_sub.empty:
+    st.info("No subfield-level data for this partner.")
+else:
+    # Domain marker (emoji + name)
+    df_sub_display = df_sub.copy()
+    df_sub_display["Domain marker"] = df_sub_display["Domain"].apply(
+        lambda d: f"{DOMAIN_EMOJI.get(d, '⬜')} {d}"
+    )
+
+    df_sub_display = df_sub_display[
+        [
+            "Domain marker",
+            "Field",
+            "Subfield",
+            "share_mix",
+            "share_vs_partner_total",
+            "share_vs_upcite_total",
+            "copubs",
+            "partner_total_subfield",
+            "fwci",
+        ]
+    ].rename(
+        columns={
+            "Domain marker": "Domain",
+            "share_mix": "Share within co-publications",
+            "share_vs_partner_total": "Share vs partner total",
+            "share_vs_upcite_total": "Share vs UPCité total",
+            "copubs": "Co-publications",
+            "partner_total_subfield": "Partner's total pubs in subfield",
+            "fwci": "FWCI",
+        }
+    )
+
+    st.dataframe(
+        df_sub_display,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Share within co-publications": st.column_config.ProgressColumn(
+                "Share within co-publications",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.2f",
+                help="Fraction of this partner's co-publications with UPCité that fall in this subfield.",
+            ),
+            "Share vs partner total": st.column_config.ProgressColumn(
+                "Share vs partner total",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.2f",
+                help="Share of the partner's total output in this subfield that involves UPCité.",
+            ),
+            "Share vs UPCité total": st.column_config.ProgressColumn(
+                "Share vs UPCité total",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.2f",
+                help="Share of UPCité's total output in this subfield that involves this partner.",
+            ),
+            "Co-publications": st.column_config.NumberColumn(
+                "Co-publications", format="%d"
+            ),
+            "Partner's total pubs in subfield": st.column_config.NumberColumn(
+                "Partner's total pubs in subfield", format="%d"
+            ),
+            "FWCI": st.column_config.NumberColumn("FWCI", format="%.2f"),
+        },
     )
