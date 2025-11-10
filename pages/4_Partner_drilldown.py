@@ -641,7 +641,7 @@ else:
             df_bub,
             x="rel_vs_upcite_pct",
             y="rel_vs_partner_pct",
-            size="fwci",  # bubble size = FWCI
+            size="count",  # bubble size = count
             size_max=40,
             color="domain",
             color_discrete_map=DOMAIN_COLORS,
