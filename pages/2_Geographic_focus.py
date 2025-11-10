@@ -357,7 +357,7 @@ else:
     )
 
     fig_map.update_layout(
-        margin=dict(l=0, r=0, t=20, b=0),
+        margin=dict(l=0, r=0, t=10, b=0),
         coloraxis_colorbar=dict(title=metric_label),
         height=650,
     )
