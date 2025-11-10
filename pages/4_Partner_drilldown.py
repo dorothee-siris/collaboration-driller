@@ -482,8 +482,6 @@ with col_share:
     if df_fields.empty or df_fields["count"].sum() == 0:
         st.info("No field-level co-publications recorded for this partner.")
     else:
-        customdata_share = df_fields[["count", "fwci"]].to_numpy()
-
         fig_share = px.bar(
             df_fields,
             x="share_with_partner_pct",
@@ -492,10 +490,10 @@ with col_share:
             color="domain",
             color_discrete_map=DOMAIN_COLORS,
             labels={"share_with_partner_pct": "Share (%)", "Field": ""},
+            custom_data=["count", "fwci"],  # <-- key change
         )
 
         fig_share.update_traces(
-            customdata=customdata_share,
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "Share of this partner's co-publications: %{x:.1f}%<br>"
@@ -547,8 +545,6 @@ with col_fwci:
     if df_fields.empty or df_fields["count"].sum() == 0:
         st.info("No field-level co-publications recorded for this partner.")
     else:
-        customdata_fwci = df_fields[["count", "share_with_partner_pct"]].to_numpy()
-
         fig_fwci = px.bar(
             df_fields,
             x="fwci",
@@ -557,10 +553,10 @@ with col_fwci:
             color="domain",
             color_discrete_map=DOMAIN_COLORS,
             labels={"fwci": "Average FWCI", "Field": ""},
+            custom_data=["count", "share_with_partner_pct"],  # <-- key change
         )
 
         fig_fwci.update_traces(
-            customdata=customdata_fwci,
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "Average FWCI: %{x:.2f}<br>"
@@ -656,6 +652,7 @@ else:
                 "fwci": "Average FWCI",
                 "domain": "",
             },
+            custom_data=["count", "fwci"],  # <-- key change
         )
 
         fig_bub.update_traces(
@@ -663,11 +660,10 @@ else:
                 "<b>%{hovertext}</b><br>"
                 "Share vs UPCité total: %{x:.2f}%<br>"
                 "Share vs partner total: %{y:.2f}%<br>"
-                "Average FWCI: %{marker.size:.2f}<br>"
+                "Average FWCI: %{customdata[1]:.2f}<br>"
                 "Co-publications: %{customdata[0]:,.0f}"
                 "<extra></extra>"
             ),
-            customdata=df_bub[["count"]].to_numpy(),
         )
 
         # y = x diagonal, clipped to the smaller axis
