@@ -38,6 +38,9 @@ if str(LIB_DIR) not in sys.path:
 # ---------------------------------------------------------------------
 _TAX = build_taxonomy_lookups()
 
+# Use canonical domain order, but drop "Other" for the 4 macro-domains
+DOMAINS = [d for d in _TAX["domain_order"] if d != "Other"]
+
 # Canonical field order & subfields
 CANONICAL_FIELDS = canonical_field_order()
 SUBFIELDS_BY_FIELD: Dict[str, List[str]] = _TAX["subfields_by_field"]
@@ -399,9 +402,8 @@ share_partner_total = float(partner_row.get("Share of Partner's total production
 avg_fwci = float(partner_row.get("average FWCI", 0.0) or 0.0)
 
 total_upcite_intl = get_total_upcite_international_copubs()
-share_upcite_intl = (copubs / total_upcite_intl) if total_upcite_intl > 0 else 0.0
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.metric("Co-publications with UPCité (2020–24)", f"{copubs:,}")
@@ -419,18 +421,24 @@ with col3:
     )
 
 with col4:
-    st.metric(
-        "Share of UPCité's international collaborations",
-        f"{share_upcite_intl * 100:.2f}%",
-    )
-
-with col5:
     st.metric("Average FWCI of co-publications", f"{avg_fwci:.2f}")
 
 # ---------------------------------------------------------------------
 # 3) Yearly distribution by domain
 # ---------------------------------------------------------------------
 st.markdown("### Yearly distribution by domain")
+
+legend_html = "<div style='margin: 0.8rem 0 0.4rem 0;'>"
+for d in DOMAINS:
+    color = DOMAIN_COLORS[d]
+    legend_html += (
+        f"<span style='display:inline-block;width:12px;height:12px;"
+        f"border-radius:50%;background-color:{color};margin-right:4px;'></span>"
+        f"<span style='margin-right:14px;'>{d}</span>"
+    )
+legend_html += "</div>"
+
+st.markdown(legend_html, unsafe_allow_html=True)
 
 df_year_dom = parse_partner_year_domain_counts(partner_row.get("Copubs per year and domain"))
 df_year_dom = df_year_dom[df_year_dom["copubs"] > 0]
@@ -453,7 +461,7 @@ else:
     )
     fig_year_dom.update_layout(
         margin=dict(l=0, r=10, t=10, b=10),
-        showlegend=True,
+        showlegend=False,
         height=380,
     )
     st.plotly_chart(fig_year_dom, width="stretch")
@@ -611,13 +619,15 @@ else:
     if df_bub.empty:
         st.info("No non-zero strategic weights available for this partner.")
     else:
-        max_val = max(
-            float(df_bub["rel_vs_upcite_pct"].max() or 0.0),
-            float(df_bub["rel_vs_partner_pct"].max() or 0.0),
-        )
-        if max_val <= 0:
-            max_val = 1.0
-        max_val *= 1.05
+        # Independent axis ranges for X and Y (values are already in %)
+        max_x = float(df_bub["rel_vs_upcite_pct"].max() or 0.0)
+        max_y = float(df_bub["rel_vs_partner_pct"].max() or 0.0)
+
+        x_max = max_x * 1.05 if max_x > 0 else 1.0
+        y_max = max_y * 1.05 if max_y > 0 else 1.0
+
+        # Diagonal must stay within the visible frame
+        diag_max = min(x_max, y_max)
 
         fig_bub = px.scatter(
             df_bub,
@@ -648,22 +658,23 @@ else:
             customdata=df_bub[["count"]].to_numpy(),
         )
 
-        # y = x diagonal
+        # y = x diagonal, clipped to the smaller axis
         fig_bub.add_shape(
             type="line",
             x0=0,
             y0=0,
-            x1=max_val,
-            y1=max_val,
+            x1=diag_max,
+            y1=diag_max,
             line=dict(color="#444", dash="dash"),
         )
 
-        fig_bub.update_xaxes(range=[0, max_val], showgrid=True, gridcolor="#eee")
-        fig_bub.update_yaxes(range=[0, max_val], showgrid=True, gridcolor="#eee")
+        fig_bub.update_xaxes(range=[0, x_max], showgrid=True, gridcolor="#eee")
+        fig_bub.update_yaxes(range=[0, y_max], showgrid=True, gridcolor="#eee")
 
         fig_bub.update_layout(
             margin=dict(l=0, r=10, t=25, b=10),
             height=520,
+            showlegend=False,
             legend_title_text="",
         )
 
