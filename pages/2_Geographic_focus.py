@@ -356,21 +356,31 @@ else:
         ),
     )
 
-    # Make the figure a bit less tall and reduce extra margins
+    # Make the figure a bit shorter and remove extra padding
     fig_map.update_layout(
         margin=dict(l=0, r=0, t=0, b=0),
         coloraxis_colorbar=dict(title=metric_label),
-        height=650,   # was 650 – this shrinks the big white band
+        height=480,   # shorter canvas so the blank band shrinks
     )
 
-    # Let the map itself use more of the available canvas
+    # Let continents fill more of the canvas:
+    # - fit to visible countries
+    # - zoom in a bit
+    # - crop a bit of the extreme poles, which are mostly empty ocean
     fig_map.update_geos(
-        fitbounds="locations",   # fit to the visible countries
-        projection_scale=0.95,   # zoom in slightly so it doesn’t “float” in the middle
+        fitbounds="locations",
+        projection_type="natural earth",
+        projection_scale=1.6,           # increase if you still feel it’s too “low”
+        center=dict(lat=15, lon=10),    # slight northward shift
+        lataxis_range=[-60, 75],        # trims Antarctica + deep Arctic
         showcountries=True,
     )
 
-    st.plotly_chart(fig_map, use_container_width=True)
+    # Put the map in a central column so it doesn’t span the full screen width
+    left_pad, map_col, right_pad = st.columns([0.07, 0.86, 0.07])
+    with map_col:
+        st.plotly_chart(fig_map, use_container_width=True)
+
 
 # -------------------------------------------------------------------------
 # COUNTRY FOCUS
