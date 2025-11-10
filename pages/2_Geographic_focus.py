@@ -64,7 +64,7 @@ CANONICAL_FIELDS = canonical_field_order()
 # -------------------------------------------------------------------------
 
 
-@st.cache_data
+@st.cache_data(ttl=3600)  # 1 hour
 def load_geo_data():
     df_country = pd.read_parquet(DATA_DIR / "upcite_country.parquet")
     df_partners = pd.read_parquet(DATA_DIR / "upcite_partners.parquet")

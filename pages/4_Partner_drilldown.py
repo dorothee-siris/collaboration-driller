@@ -85,23 +85,16 @@ DOMAIN_EMOJI = {
 # ---------------------------------------------------------------------
 # Data loaders
 # ---------------------------------------------------------------------
-@st.cache_data
-def load_core() -> pd.DataFrame:
-    return pd.read_parquet(DATA_DIR / "upcite_core.parquet")
 
-
-@st.cache_data
+@st.cache_data(ttl=3600)  # 1 hour
 def load_partners() -> pd.DataFrame:
-    return pd.read_parquet(DATA_DIR / "upcite_partners.parquet")
-
-
-@st.cache_data
-def get_total_upcite_international_copubs() -> int:
-    """Total number of UPCité publications that are tagged as international."""
-    core = load_core()
-    if "is_international" not in core.columns:
-        return 0
-    return int(core.loc[core["is_international"] == True].shape[0])
+    df = pd.read_parquet(DATA_DIR / "upcite_partners.parquet")
+    if "Thematic words (top 500)" in df.columns:
+        df = df.drop(columns=["Thematic words (top 500)"])
+    df["Partner name"] = df["Partner name"].astype("category")
+    df["Partner country"] = df["Partner country"].astype("category")
+    df["Partner type"] = df["Partner type"].astype("category")
+    return df
 
 
 # ---------------------------------------------------------------------
@@ -399,8 +392,6 @@ partner_total_output = int(partner_row.get("Partner's total output (2020-24)", 0
 share_upcite_total = float(partner_row.get("Share of UPCité's production", 0.0) or 0.0)
 share_partner_total = float(partner_row.get("Share of Partner's total production", 0.0) or 0.0)
 avg_fwci = float(partner_row.get("average FWCI", 0.0) or 0.0)
-
-total_upcite_intl = get_total_upcite_international_copubs()
 
 col1, col2, col3, col4 = st.columns(4)
 

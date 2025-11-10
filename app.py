@@ -31,12 +31,12 @@ st.caption("Université Paris Cité – collaborations with external partners (2
 # ---------------------------------------------------------------------
 # Data loaders (cached)
 # ---------------------------------------------------------------------
-@st.cache_data
+@st.cache_data(ttl=3600)  # 1 hour
 def load_core() -> pd.DataFrame:
     return pd.read_parquet(DATA_DIR / "upcite_core.parquet")
 
 
-@st.cache_data
+@st.cache_data(ttl=3600)  # 1 hour
 def load_partners() -> pd.DataFrame:
     return pd.read_parquet(DATA_DIR / "upcite_partners.parquet")
 
