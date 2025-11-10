@@ -360,7 +360,7 @@ else:
     fig_map.update_layout(
         margin=dict(l=0, r=0, t=0, b=0),
         coloraxis_colorbar=dict(title=metric_label),
-        height=400,   # was 650 – this shrinks the big white band
+        height=800,   # was 650 – this shrinks the big white band
     )
 
     # Let the map itself use more of the available canvas
@@ -370,7 +370,7 @@ else:
         showcountries=True,
     )
 
-    st.plotly_chart(fig_map, use_container_width=True)
+    st.plotly_chart(fig_map, use_container_width=False)
 
 # -------------------------------------------------------------------------
 # COUNTRY FOCUS
