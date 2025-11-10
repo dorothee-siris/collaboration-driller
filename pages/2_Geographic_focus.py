@@ -356,10 +356,18 @@ else:
         ),
     )
 
+    # Make the figure a bit less tall and reduce extra margins
     fig_map.update_layout(
-        margin=dict(l=0, r=0, t=10, b=0),
+        margin=dict(l=0, r=0, t=0, b=0),
         coloraxis_colorbar=dict(title=metric_label),
-        height=650,
+        height=520,   # was 650 – this shrinks the big white band
+    )
+
+    # Let the map itself use more of the available canvas
+    fig_map.update_geos(
+        fitbounds="locations",   # fit to the visible countries
+        projection_scale=1.05,   # zoom in slightly so it doesn’t “float” in the middle
+        showcountries=True,
     )
 
     st.plotly_chart(fig_map, use_container_width=True)
