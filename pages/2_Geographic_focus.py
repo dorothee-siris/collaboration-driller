@@ -332,7 +332,7 @@ else:
             "Share of UPCité's international collaborations: %{customdata[1]:.1%}<br>"
             "Number of partners: %{customdata[2]:,.0f}<br>"
             "Average FWCI: %{customdata[3]:.2f}<br>"
-            "Domain breakdown (share of this country's co-publications): %{customdata[4]}"
+            "Domain breakdown: %{customdata[4]}"
             "<extra></extra>"
         ),
     )
