@@ -38,9 +38,6 @@ if str(LIB_DIR) not in sys.path:
 # ---------------------------------------------------------------------
 _TAX = build_taxonomy_lookups()
 
-# Use canonical domain order, but drop "Other" for the 4 macro-domains
-DOMAINS = [d for d in _TAX["domain_order"] if d != "Other"]
-
 # Canonical field order & subfields
 CANONICAL_FIELDS = canonical_field_order()
 SUBFIELDS_BY_FIELD: Dict[str, List[str]] = _TAX["subfields_by_field"]
@@ -73,6 +70,8 @@ def get_domain_meta() -> Tuple[List[int], List[str]]:
 
 DOMAIN_IDS, DOMAIN_NAMES_BY_ID = get_domain_meta()
 DOMAIN_COLORS = {name: get_domain_color(name) for name in DOMAIN_NAMES_BY_ID}
+# Domain list in the same order as the partner's pipe-series (domain_id ascending)
+DOMAINS = [d for d in DOMAIN_NAMES_BY_ID if d != "Other"]
 
 # Emoji marker for domains (for tables)
 DOMAIN_EMOJI = {
@@ -608,6 +607,12 @@ with col_fwci:
 # ---------------------------------------------------------------------
 st.markdown("### Strategic weight of co-publications by field")
 
+lock_axes = st.toggle(
+    "Use the same scale for X and Y", 
+    value=False, 
+    help="When on, both axes use the same max so the diagonal is visually meaningful."
+)
+
 df_bub = df_fields[df_fields["count"] > 0].copy()
 if df_bub.empty:
     st.info("No fields with co-publications to display.")
@@ -619,12 +624,19 @@ else:
     if df_bub.empty:
         st.info("No non-zero strategic weights available for this partner.")
     else:
+
+        
         # Independent axis ranges for X and Y (values are already in %)
         max_x = float(df_bub["rel_vs_upcite_pct"].max() or 0.0)
         max_y = float(df_bub["rel_vs_partner_pct"].max() or 0.0)
 
         x_max = max_x * 1.05 if max_x > 0 else 1.0
         y_max = max_y * 1.05 if max_y > 0 else 1.0
+
+        # If toggle is ON, force both axes to the same max
+        if lock_axes:
+            v = max(x_max, y_max)
+            x_max = y_max = v
 
         # Diagonal must stay within the visible frame
         diag_max = min(x_max, y_max)
