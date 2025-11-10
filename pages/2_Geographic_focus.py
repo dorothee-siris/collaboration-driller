@@ -35,6 +35,15 @@ _TAX = build_taxonomy_lookups()
 # Use canonical domain order, but drop "Other" for the 4 macro-domains
 DOMAINS = [d for d in _TAX["domain_order"] if d != "Other"]
 
+# Order used in the pre-aggregated "per domain" numeric series
+# (domain 1..4 in upcite_country): Life / Social / Physical / Health
+DOMAIN_SERIES_ORDER = [
+    "Life Sciences",
+    "Social Sciences",
+    "Physical Sciences",
+    "Health Sciences",
+]
+
 # colour map for those domains, coming from taxonomy's palette
 DOMAIN_COLORS = {d: get_domain_color(d) for d in DOMAINS}
 
@@ -125,7 +134,10 @@ def parse_year_domain_counts(raw: str) -> pd.DataFrame:
     Parse strings like:
     '2020 (126 ; 33 ; 175 ; 374) | 2021 (104 ; 46 ; 201 ; 373) | ...'
     into columns: year, domain, copubs.
-    Domain order is DOMAINS.
+
+    The numeric series are ordered by domain ID 1..4, which correspond to:
+    Life Sciences / Social Sciences / Physical Sciences / Health Sciences
+    (see DOMAIN_SERIES_ORDER).
     """
     if raw is None or (isinstance(raw, float) and np.isnan(raw)):
         return pd.DataFrame(columns=["year", "domain", "copubs"])
@@ -135,17 +147,21 @@ def parse_year_domain_counts(raw: str) -> pd.DataFrame:
     records = []
 
     for part in parts:
-        # Extract year and inside of parentheses
         m = re.match(r"(\d{4})\s*\(([^)]*)\)", part)
         if not m:
             continue
         year = int(m.group(1))
         nums = [n.strip() for n in m.group(2).split(";") if n.strip()]
         nums = [int(n) for n in nums]
-        n = min(len(nums), len(DOMAINS))
-        for i in range(n):
+
+        n_domains = min(len(nums), len(DOMAIN_SERIES_ORDER))
+        for i in range(n_domains):
             records.append(
-                {"year": year, "domain": DOMAINS[i], "copubs": nums[i]}
+                {
+                    "year": year,
+                    "domain": DOMAIN_SERIES_ORDER[i],
+                    "copubs": nums[i],
+                }
             )
 
     return pd.DataFrame(records)
@@ -296,8 +312,11 @@ else:
         shares = parse_pipe(row.get("domain_share_vs_country"), float)
         if not shares:
             return "n/a"
-        pairs = list(zip(DOMAINS, shares[: len(DOMAINS)]))
+
+        # Map the 4 numeric values to the correct domains (Life / Social / Physical / Health)
+        pairs = list(zip(DOMAIN_SERIES_ORDER, shares[: len(DOMAIN_SERIES_ORDER)]))
         pairs = sorted(pairs, key=lambda x: x[1], reverse=True)
+
         parts = [f"{int(round(s * 100))}% {name}" for name, s in pairs if s > 0]
         return ", ".join(parts) if parts else "n/a"
 
