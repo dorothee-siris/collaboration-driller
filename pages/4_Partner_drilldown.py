@@ -461,6 +461,18 @@ else:
 # ---------------------------------------------------------------------
 st.markdown("### Thematic profile of collaborations")
 
+legend_html = "<div style='margin: 0.8rem 0 0.4rem 0;'>"
+for d in DOMAINS:
+    color = DOMAIN_COLORS[d]
+    legend_html += (
+        f"<span style='display:inline-block;width:12px;height:12px;"
+        f"border-radius:50%;background-color:{color};margin-right:4px;'></span>"
+        f"<span style='margin-right:14px;'>{d}</span>"
+    )
+legend_html += "</div>"
+
+st.markdown(legend_html, unsafe_allow_html=True)
+
 df_fields = build_partner_field_df(partner_row)
 
 col_share, col_fwci = st.columns(2)
@@ -593,6 +605,18 @@ with col_fwci:
 # 5) Strategic weight per field (bubble chart)
 # ---------------------------------------------------------------------
 st.markdown("### Strategic weight of co-publications by field")
+
+legend_html = "<div style='margin: 0.8rem 0 0.4rem 0;'>"
+for d in DOMAINS:
+    color = DOMAIN_COLORS[d]
+    legend_html += (
+        f"<span style='display:inline-block;width:12px;height:12px;"
+        f"border-radius:50%;background-color:{color};margin-right:4px;'></span>"
+        f"<span style='margin-right:14px;'>{d}</span>"
+    )
+legend_html += "</div>"
+
+st.markdown(legend_html, unsafe_allow_html=True)
 
 lock_axes = st.toggle(
     "Use the same scale for X and Y", 
