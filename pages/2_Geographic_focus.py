@@ -365,7 +365,7 @@ else:
             # position and size the bar so it lines up better with the globe
             yanchor="middle",
             y=0.5,     # center vertically
-            len=0.7,   # make it shorter so its top ≈ top of the map, bottom ≈ bottom
+            len=0.85,   # make it shorter so its top ≈ top of the map, bottom ≈ bottom
         ),
     )
 
