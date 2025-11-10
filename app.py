@@ -180,30 +180,6 @@ else:
     # -----------------------------------------------------------------
     st.markdown("### Strategic weight against top selected partners")
 
-    # How many partners to display?
-    max_available = min(100, len(df_filtered))
-    n_top = st.slider(
-        "Number of partners displayed in the chart",
-        min_value=1,
-        max_value=max_available if max_available > 0 else 1,
-        value=max_available if max_available > 0 else 1,
-        step=1,
-    )
-
-    # Compute minimum co-publications among partners that will be displayed
-    sorted_tmp = df_filtered.sort_values(
-        "Count of co-publications", ascending=False
-    )
-    top_tmp = sorted_tmp.head(n_top)
-
-    if not top_tmp.empty:
-        min_copubs = int(top_tmp["Count of co-publications"].min())
-        st.markdown(
-            f"_All top **{len(top_tmp)}** institutions displayed in the chart below "
-            f"have at least **{min_copubs}** co-publications with "
-            f"Université Paris Cité, given the selected criteria._"
-        )
-
     st.markdown(
         """
         **How to read this chart**
@@ -231,6 +207,30 @@ else:
               where collaboration has a comparable weight for both sides.
         """
     )
+
+    # How many partners to display?
+    max_available = min(100, len(df_filtered))
+    n_top = st.slider(
+        "Number of partners displayed in the chart",
+        min_value=1,
+        max_value=max_available if max_available > 0 else 1,
+        value=max_available if max_available > 0 else 1,
+        step=1,
+    )
+
+    # Compute minimum co-publications among partners that will be displayed
+    sorted_tmp = df_filtered.sort_values(
+        "Count of co-publications", ascending=False
+    )
+    top_tmp = sorted_tmp.head(n_top)
+
+    if not top_tmp.empty:
+        min_copubs = int(top_tmp["Count of co-publications"].min())
+        st.markdown(
+            f"_All top **{len(top_tmp)}** institutions displayed in the chart below "
+            f"have at least **{min_copubs}** co-publications with "
+            f"Université Paris Cité, given the selected criteria._"
+        )
 
 
     # Custom HTML legend (blue / red / grey)
