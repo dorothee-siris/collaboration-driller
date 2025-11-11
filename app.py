@@ -1,23 +1,24 @@
 # app.py  --  Page 1: Overview
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-
-import numpy as np
-import pandas as pd
-import plotly.express as px
+import sys
 import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
 
-# ---------------------------------------------------------------------
-# Paths & imports
-# ---------------------------------------------------------------------
+from lib.data_cache import get_core_df, get_partners_df
+
+from lib.debug_tools import render_debug_sidebar
+render_debug_sidebar()
+
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
 LIB_DIR = BASE_DIR / "lib"
-
 if str(LIB_DIR) not in sys.path:
     sys.path.append(str(LIB_DIR))
+
+
 
 st.set_page_config(
     page_title="Overview – UPCité Collaborations",
@@ -25,24 +26,8 @@ st.set_page_config(
     page_icon="🌐",
 )
 
-st.title("Overview")
-st.caption("Université Paris Cité – collaborations with external partners (2020–24)")
-
-# ---------------------------------------------------------------------
-# Data loaders (cached)
-# ---------------------------------------------------------------------
-@st.cache_data(ttl=3600)  # 1 hour
-def load_core() -> pd.DataFrame:
-    return pd.read_parquet(DATA_DIR / "upcite_core.parquet")
-
-
-@st.cache_data(ttl=3600)  # 1 hour
-def load_partners() -> pd.DataFrame:
-    return pd.read_parquet(DATA_DIR / "upcite_partners.parquet")
-
-
-core_df = load_core()
-partners_df = load_partners()
+core_df = get_core_df()
+partners_df = get_partners_df()
 
 TOP_THRESHOLD = 20
 top_partners_df = partners_df[

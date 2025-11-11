@@ -19,11 +19,22 @@ from lib.taxonomy import (
     get_domain_for_field,
 )
 
+from lib.data_cache import (
+    get_country_df,
+    get_partners_df,
+    get_topics_df,
+)
+
+from lib.debug_tools import render_debug_sidebar
+render_debug_sidebar()
+
 # -------------------------------------------------------------------------
 # Page / paths / constants
 # -------------------------------------------------------------------------
 
-st.set_page_config(layout="wide")
+# In a multipage app, it's better to call set_page_config only in app.py.
+# If you're already doing it there, you can REMOVE this line.
+# st.set_page_config(layout="wide")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -60,29 +71,30 @@ DOMAIN_EMOJI = {
 CANONICAL_FIELDS = canonical_field_order()
 
 # -------------------------------------------------------------------------
-# Data loading helpers
+# Load shared data
 # -------------------------------------------------------------------------
 
-
-@st.cache_data(ttl=3600)  # 1 hour
-def load_geo_data():
-    df_country = pd.read_parquet(DATA_DIR / "upcite_country.parquet")
-    df_partners = pd.read_parquet(DATA_DIR / "upcite_partners.parquet")
-    return df_country, df_partners
+df_country = get_country_df()
+df_partners = get_partners_df()
 
 # Total UPCité publications over 2020–24 (all outputs, not only intl. copubs)
 UPCITE_TOTAL_PUBLICATIONS = 89069
 
-@st.cache_data
-def load_subfields_by_field():
+
+# -------------------------------------------------------------------------
+# Subfield lookup (from all_topics)
+# -------------------------------------------------------------------------
+
+@st.cache_resource
+def load_subfields_by_field() -> dict[str, list[str]]:
     """
     Build a mapping: field name -> ordered list of subfield names,
     using all_topics.parquet. We sort first by field, then by subfield_id
     if present, otherwise by subfield_name.
     """
-    df_topics = pd.read_parquet(DATA_DIR / "all_topics.parquet")
+    df_topics = get_topics_df()
 
-    sort_cols = []
+    sort_cols: list[str] = []
     if "field_name" in df_topics.columns:
         sort_cols.append("field_name")
     if "subfield_id" in df_topics.columns:
@@ -96,15 +108,13 @@ def load_subfields_by_field():
         .dropna()
     )
 
-    mapping = {}
+    mapping: dict[str, list[str]] = {}
     for f, grp in df_sf.groupby("field_name"):
         mapping[f] = grp["subfield_name"].tolist()
     return mapping
 
 
 SUBFIELDS_BY_FIELD = load_subfields_by_field()
-df_country, df_partners = load_geo_data()
-
 
 def parse_pipe(s, cast=float):
     """

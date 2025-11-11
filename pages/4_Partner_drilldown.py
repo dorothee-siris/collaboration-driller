@@ -1,11 +1,10 @@
 # pages/4_Partner_drilldown.py
 from __future__ import annotations
 
-import re
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import re
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -20,18 +19,22 @@ from lib.taxonomy import (
     get_field_color,
     get_subfield_color,
 )
+from lib.data_cache import get_partners_df, get_topics_df
+
+from lib.debug_tools import render_debug_sidebar
+render_debug_sidebar()
+
 
 # ---------------------------------------------------------------------
 # Paths & basic config
 # ---------------------------------------------------------------------
-st.set_page_config(layout="wide")
+
+# In a multipage app, it's best to call set_page_config only once in app.py.
+# If you already do it there, comment out the next line.
+# st.set_page_config(layout="wide")
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
-LIB_DIR = BASE_DIR / "lib"
-
-if str(LIB_DIR) not in sys.path:
-    sys.path.append(str(LIB_DIR))
 
 # ---------------------------------------------------------------------
 # Global taxonomy helpers
@@ -49,15 +52,11 @@ FIELD_ID_TO_NAME: Dict[int, str] = {
 FIELD_IDS_BY_ID_ORDER: List[int] = sorted(FIELD_ID_TO_NAME.keys())
 FIELD_NAMES_BY_ID: List[str] = [FIELD_ID_TO_NAME[i] for i in FIELD_IDS_BY_ID_ORDER]
 
-# Domain metadata from topics (ordered by domain_id)
-@st.cache_data
-def load_topics() -> pd.DataFrame:
-    return pd.read_parquet(DATA_DIR / "all_topics.parquet")
 
-
-@st.cache_data
+@st.cache_resource
 def get_domain_meta() -> Tuple[List[int], List[str]]:
-    topics = load_topics()
+    """Domain IDs and names in ascending domain_id order."""
+    topics = get_topics_df()
     meta = (
         topics[["domain_id", "domain_name"]]
         .drop_duplicates()
@@ -86,15 +85,7 @@ DOMAIN_EMOJI = {
 # Data loaders
 # ---------------------------------------------------------------------
 
-@st.cache_data(ttl=3600)  # 1 hour
-def load_partners() -> pd.DataFrame:
-    df = pd.read_parquet(DATA_DIR / "upcite_partners.parquet")
-    if "Thematic words (top 500)" in df.columns:
-        df = df.drop(columns=["Thematic words (top 500)"])
-    df["Partner name"] = df["Partner name"].astype("category")
-    df["Partner country"] = df["Partner country"].astype("category")
-    df["Partner type"] = df["Partner type"].astype("category")
-    return df
+partners_df = get_partners_df()
 
 
 # ---------------------------------------------------------------------
@@ -341,8 +332,6 @@ def make_partner_subfield_df(row: pd.Series) -> pd.DataFrame:
 # Page layout
 # ---------------------------------------------------------------------
 st.title("Partner drilldown")
-
-partners_df = load_partners()
 
 # 1) Search & selection ------------------------------------------------
 search = st.text_input("Search partner by name (min. 2 characters)", "")
