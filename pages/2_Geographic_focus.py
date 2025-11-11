@@ -379,7 +379,7 @@ else:
         ),
     )
 
-    st.plotly_chart(fig_map, use_container_width=True)
+    st.plotly_chart(fig_map, width='stretch')
 
 
 # -------------------------------------------------------------------------
@@ -477,7 +477,7 @@ else:
         showlegend=False,
         height=300,
     )
-    st.plotly_chart(fig_year_dom, use_container_width=True)
+    st.plotly_chart(fig_year_dom, width='stretch')
 
 # -------------------------------------------------------------------------
 # Thematic profile (fields, subfields)
@@ -600,7 +600,7 @@ with col_fc:
             height=700,  # ~50% taller than default
         )
 
-        st.plotly_chart(fig_fc, use_container_width=True)
+        st.plotly_chart(fig_fc, width='stretch')
 
 with col_fi:
     st.markdown(
@@ -664,7 +664,7 @@ with col_fi:
             height=700,
         )
 
-        st.plotly_chart(fig_fi, use_container_width=True)
+        st.plotly_chart(fig_fi, width='stretch')
 
 
 # --- Subfield table (two baselines, progress bars) ------------------------
@@ -837,7 +837,7 @@ else:
     st.dataframe(
         df_sub_display,
         hide_index=True,
-        use_container_width=True,
+        width='stretch',
         column_config={
             "Share vs country (%)": st.column_config.ProgressColumn(
                 "Share vs country (%)",
@@ -933,7 +933,7 @@ else:
         st.dataframe(
             df_pt_display,
             hide_index=True,
-            use_container_width=True,
+            width='stretch',
             column_config={
                 "Share of UPCité's production (%)": st.column_config.ProgressColumn(
                     "Share of UPCité's production",
