@@ -15,4 +15,4 @@ def render_debug_sidebar():
         if st.button("Clear all caches & rerun"):
             st.cache_data.clear()
             st.cache_resource.clear()
-            st.experimental_rerun()
+            st.rerun()

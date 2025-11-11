@@ -195,13 +195,22 @@ else:
 
     # How many partners to display?
     max_available = min(100, len(df_filtered))
-    n_top = st.slider(
-        "Number of partners displayed in the chart",
-        min_value=1,
-        max_value=max_available if max_available > 0 else 1,
-        value=max_available if max_available > 0 else 1,
-        step=1,
-    )
+
+    if max_available <= 1:
+        # Only one partner to show – no slider needed
+        n_top = 1
+        st.caption(
+            "Only one partner matches the selected criteria; "
+            "the chart below shows this partner."
+        )
+    else:
+        n_top = st.slider(
+            "Number of partners displayed in the chart",
+            min_value=1,
+            max_value=max_available,
+            value=max_available,  # or min(20, max_available) if you prefer
+            step=1,
+        )
 
     # Compute minimum co-publications among partners that will be displayed
     sorted_tmp = df_filtered.sort_values(
